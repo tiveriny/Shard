@@ -4,13 +4,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="shard-build" content="13" />
+  <meta name="shard-build" content="14" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <base href="./" />
   <title>Shard — Приватные диалоги</title>
-  <link rel="stylesheet" href="static/styles.css?v=shard-14" />
+  <link rel="stylesheet" href="static/styles.css?v=shard-20" />
   <link rel="icon" href="static/favicon.svg" type="image/svg+xml" />
 </head>
 
@@ -62,7 +62,7 @@
           <!-- Tabs -->
           <div class="sidebar-tabs">
             <button class="tab-btn active" data-tab="contacts">Контакты</button>
-            <button class="tab-btn" data-tab="security">🔐 Безопасность</button>
+            <button class="tab-btn" data-tab="security">Новости и 🔐 Безопасность</button>
           </div>
 
           <!-- Contacts Tab (sidebar only) -->
@@ -128,13 +128,35 @@
               <input id="messageInput" type="text" placeholder="Напишите сообщение" />
               <button id="sendBtn" class="primary">Отправить</button>
             </div>
+
+            <!-- Drop overlay -->
+            <div id="dropOverlay" class="drop-overlay hidden">
+              <div class="drop-overlay-content">
+                <span class="drop-icon">📎</span>
+                <p>Перетащите файл сюда</p>
+              </div>
+            </div>
+
+            <!-- Upload processing overlay -->
+            <div id="uploadOverlay" class="upload-overlay hidden">
+              <div class="loading-spinner"></div>
+              <p class="upload-text">Обработка файла…</p>
+            </div>
           </div>
 
           <!-- Security view (shown in chat area when security tab is active) -->
           <div id="securityView" class="security-view hidden">
             <div class="security-scroll">
-              <h2>🔐 Про безопасность</h2>
+              <h2>🔐 Про безопасность и обновления</h2>
               <div class="security-content">
+                <h4>Новости</h4>
+                <p>Shard v 0.1.11. Что нового?</p>
+                <p>Версия 0.1.11 от 10.03.2026 включает в себя несколько улучшений и исправлений.</p>
+                <p>1. В новом обновлении закрыто 8 слабых мест.</p>
+                <p>2. Восстановлена функция отправки медиа(Drag And Drop)</p>
+                <p>3. Скорость отправки и доставки сообщений увеличена втрое.</p>
+                <p>Следите за новыми обновлениями!</p>
+
                 <h4>Обзор архитектуры</h4>
                 <p>Shard — мессенджер со сквозным (end-to-end) шифрованием. Сервер <strong>никогда</strong> не видит
                   открытый текст сообщений, медиафайлов или реакций. Ниже — полная техническая картина.</p>
@@ -302,10 +324,14 @@
                       2040–2050</strong>.</p>
 
                   <p><strong>6. Нет server-side ключей.</strong>
-                    В отличие от Telegram (MTProto, ключи на сервере для обычных чатов) или WhatsApp (ключи депонированы
-                    для бэкапов), Shard <strong>не хранит никаких секретных ключей</strong>. Мнемоника существует только
-                    в голове пользователя и (опционально) в <code>localStorage</code> браузера. Компрометация сервера =
-                    0 полезной информации для атакующего.</p>
+                    Shard не хранит ключи. Вообще.
+
+                    В отличие от Telegram (ключи на сервере) и WhatsApp (ключи в облаке для бэкапов), Shard не имеет
+                    доступа к вашим секретам. Мнемоника живет только у вас. Сервер видит только публичные ключи и
+                    шифротекст.
+
+                    Если завтра сервер Shard взломают — атакующий увидит ноль полезной информации. Ваши сообщения были и
+                    останутся только вашими. Навсегда.</p>
 
                   <p><strong>Вывод:</strong> Для расшифровки одного сообщения Shard атакующему необходимо либо (a)
                     решить ECDLP на Curve25519 (~2^128 операций), либо (b) полный перебор 256-битного ключа XSalsa20
@@ -394,9 +420,9 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite">Скопировано</div>
   <div id="inAppNotifications" class="inapp-notifications" aria-live="polite"></div>
 
-  <script src="static/vendor/nacl.min.js?v=shard-14"></script>
-  <script src="static/vendor/nacl-util.min.js?v=shard-14"></script>
-  <script src="static/app.js?v=shard-14"></script>
+  <script src="static/vendor/nacl.min.js?v=shard-20"></script>
+  <script src="static/vendor/nacl-util.min.js?v=shard-20"></script>
+  <script src="static/app.js?v=shard-20"></script>
 </body>
 
 </html>

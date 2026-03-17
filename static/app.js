@@ -1,4 +1,7 @@
-/* Shard — app.js — build 12 */
+/* Shard — app.js — build 13 */
+const MAX_FILE_SIZE_MB = 25;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
 const state = {
   wordlist: [],
   keys: null,
@@ -11,7 +14,7 @@ const state = {
   fetching: false,
   sse: null,
   sseConnected: false,
-  lastGlobal: 0,
+  lastGlobal: '',
   apiMode: null,
   apiProbe: null,
   pendingMessages: {},
@@ -22,6 +25,7 @@ const state = {
   staySigned: false,
   renderedIds: new Set(),
   contextTarget: null,
+  uploading: false,
 };
 
 const elements = {};
@@ -38,6 +42,7 @@ function initElements() {
     'chatView', 'chatName', 'chatStatus', 'chatSearch', 'replyPreview', 'replyText',
     'replyCancel', 'sessionStatus', 'messages', 'messageInput', 'sendBtn', 'fileInput',
     'filePill', 'lockBtn', 'toast', 'msgContextMenu', 'reactionPicker', 'globalSearchInput',
+    'dropOverlay', 'uploadOverlay',
   ];
   ids.forEach(id => { elements[id] = $(id); });
 }
@@ -59,7 +64,10 @@ function apiRoute(path) {
   const [base, qs] = path.split('?');
   const route = base.replace(/^\/api\/?/, '');
   const normalized = route.replace(/^\/+/, '');
-  const prefix = `api.php?r=${encodeURIComponent(normalized)}`;
+
+  // Safe encoding: keep the slashes literal, encode parameters
+  const safePath = normalized.split('/').map(encodeURIComponent).join('/');
+  const prefix = `api.php?r=${safePath}`;
   return qs ? `${prefix}&${qs}` : prefix;
 }
 
@@ -246,10 +254,10 @@ function resetSessionUI(reason) {
   if (state.poller) { clearInterval(state.poller); state.poller = null; }
   closeStream();
   state.token = null; state.me = null; state.keys = null;
-  state.lastSeen = {}; state.lastGlobal = 0; state.fetching = false;
+  state.lastSeen = {}; state.lastGlobal = ''; state.fetching = false;
   state.pendingMessages = {}; state.resolvingContacts = {}; state.messageCache = {};
   state.contacts = []; state.activeContact = null; state.renderedIds = new Set();
-  state.replyTarget = null; state.searchQuery = '';
+  state.replyTarget = null; state.searchQuery = ''; state.uploading = false;
 
   if (reason === 'lock' || !state.staySigned) {
     sessionStorage.removeItem('shardToken');
@@ -284,7 +292,16 @@ async function api(path, options = {}) {
     headers['X-Auth-Token'] = state.token;
   }
   if (options.json) headers['Content-Type'] = 'application/json';
-  const response = await fetch(buildUrl(apiRoute(path)), { ...options, headers, cache: 'no-store' });
+
+  let finalMethod = options.method || 'GET';
+  let finalPath = path;
+  if (finalMethod.toUpperCase() === 'DELETE' && state.apiMode === API_MODES.PHP) {
+    finalMethod = 'POST';
+    const glue = finalPath.includes('?') ? '&' : '?';
+    finalPath = `${finalPath}${glue}_method=DELETE`;
+  }
+
+  const response = await fetch(buildUrl(apiRoute(finalPath)), { ...options, method: finalMethod, headers, cache: 'no-store' });
   if (!response.ok) {
     const text = await response.text();
     const data = parseJsonSafe(text);
@@ -380,7 +397,19 @@ function setActiveChat(contact) {
   if (elements.filePill) elements.filePill.classList.remove('disabled');
 }
 
-function formatTime(iso) { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } }
+function formatTime(iso) {
+  try {
+    const d = new Date(iso);
+    const isToday = d.toDateString() === new Date().toDateString();
+    if (isToday) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else {
+      return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  } catch {
+    return '';
+  }
+}
 
 function updateConnectionStatus() {
   if (!elements.chatStatus) return;
@@ -390,13 +419,14 @@ function updateConnectionStatus() {
 
 function getGlobalLastSeen() {
   const v = Object.values(state.lastSeen);
-  if (!v.length) return 0;
-  return Math.max(0, ...v);
+  if (!v.length) return '';
+  // lastSeen values are now uuid strings; find the one from the contact with the latest message
+  return v.reduce((a, b) => a > b ? a : b, '');
 }
 
 // ─────────── SSE Stream ───────────
 function streamEndpoint() {
-  const since = Math.max(state.lastGlobal || 0, getGlobalLastSeen());
+  const since = state.lastGlobal || '0';
   return buildUrl(apiRoute(`/api/stream?token=${encodeURIComponent(state.token)}&since=${since}`));
 }
 
@@ -433,8 +463,8 @@ async function decryptMessage(message, contact) {
 }
 
 // ─────────── Reply ───────────
-function setReply(msgId, text) {
-  state.replyTarget = { id: msgId, text };
+function setReply(msgUuid, text) {
+  state.replyTarget = { uuid: msgUuid, text };
   if (elements.replyPreview) elements.replyPreview.classList.remove('hidden');
   if (elements.replyText) elements.replyText.textContent = text.length > 80 ? text.slice(0, 80) + '…' : text;
   if (elements.messageInput) elements.messageInput.focus();
@@ -447,9 +477,12 @@ function cancelReply() {
 }
 
 // ─────────── Message rendering ───────────
+function msgKey(message) { return message.uuid || message.id; }
+
 function appendMessage(message, payload, outgoing) {
-  if (state.renderedIds.has(message.id)) return;
-  state.renderedIds.add(message.id);
+  const key = msgKey(message);
+  if (state.renderedIds.has(key)) return;
+  state.renderedIds.add(key);
 
   // Search filter
   if (state.searchQuery) {
@@ -460,7 +493,7 @@ function appendMessage(message, payload, outgoing) {
 
   const wrapper = document.createElement('div');
   wrapper.className = 'message' + (outgoing ? ' outgoing' : '');
-  wrapper.dataset.msgId = message.id;
+  wrapper.dataset.msgId = key;
   wrapper.dataset.payload = JSON.stringify(payload);
 
   // Reply quote
@@ -480,7 +513,7 @@ function appendMessage(message, payload, outgoing) {
     button.addEventListener('click', () => downloadMedia(payload));
     wrapper.appendChild(title);
     wrapper.appendChild(button);
-    if (payload.mime && payload.mime.startsWith('image/')) {
+    if (payload.mime && payload.mime.startsWith('image/') && !payload.mime.includes('svg')) {
       const image = document.createElement('img');
       image.alt = payload.name || 'image';
       image.style.maxWidth = '220px';
@@ -505,12 +538,12 @@ function appendMessage(message, payload, outgoing) {
   // Reactions container
   const reactionsContainer = document.createElement('div');
   reactionsContainer.className = 'reactions';
-  reactionsContainer.id = `reactions-${message.id}`;
+  reactionsContainer.id = `reactions-${key}`;
   wrapper.appendChild(reactionsContainer);
 
   // Render existing reactions
   if (message.reactions && message.reactions.length) {
-    renderReactions(reactionsContainer, message.reactions, message.id);
+    renderReactions(reactionsContainer, message.reactions, key);
   }
 
   // Context menu trigger (right-click or long press)
@@ -525,14 +558,14 @@ function appendMessage(message, payload, outgoing) {
   // Double-click for quick reply
   wrapper.addEventListener('dblclick', () => {
     const text = payload.text || payload.name || '';
-    setReply(message.id, text);
+    setReply(key, text);
   });
 
   elements.messages.appendChild(wrapper);
   elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
-function renderReactions(container, reactions, messageId) {
+function renderReactions(container, reactions, msgKey) {
   container.innerHTML = '';
   const grouped = {};
   reactions.forEach(r => {
@@ -544,7 +577,7 @@ function renderReactions(container, reactions, messageId) {
     badge.className = 'reaction';
     badge.textContent = `${emoji} ${list.length}`;
     badge.title = list.map(r => `#${r.user_id}`).join(', ');
-    badge.addEventListener('click', () => toggleReaction(messageId, emoji));
+    badge.addEventListener('click', () => toggleReaction(msgKey, emoji));
     container.appendChild(badge);
   });
 }
@@ -571,15 +604,20 @@ function hideReactionPicker() {
 }
 
 // ─────────── Reactions ───────────
-async function toggleReaction(messageId, emoji) {
+async function toggleReaction(msgUuid, emoji) {
   try {
     await api('/api/reactions', {
       method: 'POST',
       json: true,
-      body: JSON.stringify({ message_id: messageId, emoji }),
+      body: JSON.stringify({ message_id: msgUuid, emoji }),
     });
-    // Refresh messages to update reactions
-    if (state.activeContact) await fetchMessages();
+    // Refresh only the reactions for this specific message to avoid chat scrolling
+    const res = await api(`/api/reactions?message_id=${msgUuid}`);
+    const container = document.getElementById(`reactions-${msgUuid}`);
+    if (container && res.reactions) {
+      container.innerHTML = '';
+      renderReactions(container, res.reactions, msgUuid);
+    }
   } catch (err) { pushNotice('Ошибка реакции: ' + err.message, 'warn'); }
 }
 
@@ -594,22 +632,24 @@ function showReactionPicker(message) {
     picker.style.top = (parseInt(menu.style.top) + 40) + 'px';
   }
   // Set up handlers
+  const key = msgKey(message);
   picker.querySelectorAll('.rpick').forEach(btn => {
-    btn.onclick = () => {
-      toggleReaction(message.id, btn.dataset.emoji);
+    btn.onclick = e => {
+      e.stopPropagation();
+      toggleReaction(key, btn.dataset.emoji);
       hideReactionPicker();
     };
   });
 }
 
 // ─────────── Message deletion ───────────
-async function deleteMessage(messageId) {
+async function deleteMessage(msgUuid) {
   try {
-    await api(`/api/messages/${messageId}`, { method: 'DELETE' });
+    await api(`/api/messages/${msgUuid}`, { method: 'DELETE' });
     // Remove from DOM
-    const el = elements.messages.querySelector(`[data-msg-id="${messageId}"]`);
+    const el = elements.messages.querySelector(`[data-msg-id="${msgUuid}"]`);
     if (el) { el.classList.add('msg-deleting'); setTimeout(() => el.remove(), 300); }
-    state.renderedIds.delete(messageId);
+    state.renderedIds.delete(msgUuid);
     pushNotice('Сообщение удалено', 'info');
   } catch (err) { pushNotice('Ошибка: ' + err.message, 'warn'); }
 }
@@ -645,7 +685,8 @@ function getContactById(contactId) { return state.contacts.find(c => numId(c.id)
 function queuePendingMessage(contactId, message) {
   const key = String(contactId);
   if (!state.pendingMessages[key]) state.pendingMessages[key] = [];
-  if (state.pendingMessages[key].some(item => item.id === message.id)) return;
+  const mkey = msgKey(message);
+  if (state.pendingMessages[key].some(item => msgKey(item) === mkey)) return;
   state.pendingMessages[key].push(message);
 }
 
@@ -668,15 +709,14 @@ async function drainPendingMessages(contact) {
   const key = String(contact.id);
   const list = state.pendingMessages[key];
   if (!list || !list.length) return;
-  list.sort((a, b) => a.id - b.id);
   for (const message of list) {
-    const lastSeen = state.lastSeen[contact.id] || 0;
-    if (message.id <= lastSeen) continue;
+    const mkey = msgKey(message);
+    if (state.renderedIds.has(mkey)) continue;
     const payload = await decryptMessage(message, contact);
     if (!payload) continue;
     appendMessage(message, payload, numId(message.sender_id) === numId(state.me.id));
-    state.lastSeen[contact.id] = message.id;
-    state.lastGlobal = Math.max(state.lastGlobal || 0, message.id);
+    state.lastSeen[contact.id] = mkey;
+    state.lastGlobal = mkey;
   }
   delete state.pendingMessages[key];
 }
@@ -687,13 +727,14 @@ async function handleIncomingMessage(message) {
   // Self-message
   const isSelf = numId(message.sender_id) === numId(state.me.id) && numId(message.recipient_id) === numId(state.me.id);
   const contactId = isSelf ? state.me.id : otherId;
+  const mkey = msgKey(message);
 
   let contact = getContactById(contactId);
   const isIncoming = message.sender_id !== state.me.id;
   if (!contact) {
     if (isIncoming) pushNotice('Вам пришло сообщение от неизвестного', 'warn');
     queuePendingMessage(contactId, message);
-    state.lastGlobal = Math.max(state.lastGlobal || 0, message.id);
+    state.lastGlobal = mkey;
     resolveContactById(contactId).then(resolved => {
       if (resolved && state.activeContact && numId(state.activeContact.id) === numId(resolved.id)) {
         drainPendingMessages(resolved).catch(() => { });
@@ -701,19 +742,18 @@ async function handleIncomingMessage(message) {
     }).catch(() => { });
     return;
   }
-  const lastSeen = state.lastSeen[contact.id] || 0;
-  if (message.id <= lastSeen) { state.lastGlobal = Math.max(state.lastGlobal || 0, message.id); return; }
+  if (state.renderedIds.has(mkey)) { state.lastGlobal = mkey; return; }
   if (isIncoming) pushNotice(contact.display_name ? `Новое сообщение от ${getContactLabel(contact)}` : 'Новое сообщение', 'info');
   if (!state.activeContact || numId(state.activeContact.id) !== numId(contact.id)) {
     queuePendingMessage(contact.id, message);
-    state.lastGlobal = Math.max(state.lastGlobal || 0, message.id);
+    state.lastGlobal = mkey;
     return;
   }
   const payload = await decryptMessage(message, contact);
   if (!payload) return;
   appendMessage(message, payload, numId(message.sender_id) === numId(state.me.id));
-  state.lastSeen[contact.id] = message.id;
-  state.lastGlobal = Math.max(state.lastGlobal || 0, message.id);
+  state.lastSeen[contact.id] = mkey;
+  state.lastGlobal = mkey;
 }
 
 // ─────────── Media ───────────
@@ -743,17 +783,17 @@ async function fetchMessages(force = false) {
   state.fetching = true;
   try {
     const contact = state.activeContact;
-    const isSelf = state.me && numId(contact.id) === numId(state.me.id);
-    const withUser = isSelf ? contact.id : contact.id;
-    const since = force ? 0 : (state.lastSeen[contact.id] || 0);
-    if (force) { state.lastSeen[contact.id] = 0; state.renderedIds = new Set(); elements.messages.innerHTML = ''; }
+    const withUser = contact.id;
+    const since = force ? '0' : (state.lastSeen[contact.id] || '0');
+    if (force) { state.lastSeen[contact.id] = ''; state.renderedIds = new Set(); elements.messages.innerHTML = ''; }
     const data = await api(`/api/messages?with_user=${withUser}&since=${since}`);
     for (const message of data.messages) {
       const payload = await decryptMessage(message, contact);
       if (!payload) continue;
       appendMessage(message, payload, numId(message.sender_id) === numId(state.me.id));
-      state.lastSeen[contact.id] = message.id;
-      state.lastGlobal = Math.max(state.lastGlobal || 0, message.id);
+      const mkey = msgKey(message);
+      state.lastSeen[contact.id] = mkey;
+      state.lastGlobal = mkey;
     }
   } finally { state.fetching = false; }
 }
@@ -781,7 +821,7 @@ async function sendMessage(text) {
   if (!contact) return;
   const payload = { type: 'text', text: text.trim(), ts: new Date().toISOString() };
   if (state.replyTarget) {
-    payload.reply_to = state.replyTarget.id;
+    payload.reply_to = state.replyTarget.uuid;
     payload.reply_to_text = state.replyTarget.text;
   }
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
@@ -797,31 +837,46 @@ async function sendMessage(text) {
   await fetchMessages();
 }
 
+function showUploadOverlay(show) {
+  if (elements.uploadOverlay) elements.uploadOverlay.classList.toggle('hidden', !show);
+  state.uploading = show;
+}
+
 async function sendMedia(file) {
   const contact = state.activeContact;
   if (!contact || !file) return;
-  const buffer = new Uint8Array(await file.arrayBuffer());
-  const mediaKey = nacl.randomBytes(32);
-  const mediaNonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const encrypted = nacl.secretbox(buffer, mediaNonce, mediaKey);
-  const form = new FormData();
-  form.append('recipient_id', contact.id);
-  form.append('file', new Blob([encrypted], { type: 'application/octet-stream' }), file.name);
-  const mediaRes = await api('/api/media', { method: 'POST', body: form, noJson: false });
-  const payload = {
-    type: 'media', media_id: mediaRes.media_id, media_key: encodeBase64(mediaKey),
-    media_nonce: encodeBase64(mediaNonce), name: file.name, mime: file.type || 'application/octet-stream',
-    size: file.size, ts: new Date().toISOString(),
-  };
-  const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  const isSelf = state.me && numId(contact.id) === numId(state.me.id);
-  const otherPublic = isSelf ? state.keys.box.publicKey : decodeBase64(contact.box_public_key);
-  const cipher = nacl.box(encodeText(JSON.stringify(payload)), nonce, otherPublic, state.keys.box.secretKey);
-  await api('/api/messages', {
-    method: 'POST', json: true,
-    body: JSON.stringify({ recipient_id: contact.id, ciphertext: encodeBase64(cipher), nonce: encodeBase64(nonce) }),
-  });
-  await fetchMessages();
+  // Validate file size
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    pushNotice(`Файл слишком большой (макс. ${MAX_FILE_SIZE_MB} МБ)`, 'warn');
+    return;
+  }
+  showUploadOverlay(true);
+  try {
+    const buffer = new Uint8Array(await file.arrayBuffer());
+    const mediaKey = nacl.randomBytes(32);
+    const mediaNonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+    const encrypted = nacl.secretbox(buffer, mediaNonce, mediaKey);
+    const form = new FormData();
+    form.append('recipient_id', contact.id);
+    form.append('file', new Blob([encrypted], { type: 'application/octet-stream' }), file.name);
+    const mediaRes = await api('/api/media', { method: 'POST', body: form, noJson: false });
+    const payload = {
+      type: 'media', media_id: mediaRes.media_id, media_key: encodeBase64(mediaKey),
+      media_nonce: encodeBase64(mediaNonce), name: file.name, mime: file.type || 'application/octet-stream',
+      size: file.size, ts: new Date().toISOString(),
+    };
+    const nonce = nacl.randomBytes(nacl.box.nonceLength);
+    const isSelf = state.me && numId(contact.id) === numId(state.me.id);
+    const otherPublic = isSelf ? state.keys.box.publicKey : decodeBase64(contact.box_public_key);
+    const cipher = nacl.box(encodeText(JSON.stringify(payload)), nonce, otherPublic, state.keys.box.secretKey);
+    await api('/api/messages', {
+      method: 'POST', json: true,
+      body: JSON.stringify({ recipient_id: contact.id, ciphertext: encodeBase64(cipher), nonce: encodeBase64(nonce) }),
+    });
+    await fetchMessages();
+  } finally {
+    showUploadOverlay(false);
+  }
 }
 
 // ─────────── Contacts storage ───────────
@@ -1071,9 +1126,40 @@ function wireEvents() {
   });
   elements.fileInput.addEventListener('change', event => {
     const file = event.target.files[0]; if (!file) return;
-    sendMedia(file).catch(err => alert(err.message));
+    sendMedia(file).catch(err => pushNotice(err.message, 'warn'));
     elements.fileInput.value = '';
   });
+
+  // ─────────── Drag-and-drop ───────────
+  const chatArea = elements.chatView;
+  if (chatArea) {
+    let dragCounter = 0;
+    chatArea.addEventListener('dragenter', e => {
+      e.preventDefault(); e.stopPropagation();
+      dragCounter++;
+      if (elements.dropOverlay) elements.dropOverlay.classList.remove('hidden');
+    });
+    chatArea.addEventListener('dragleave', e => {
+      e.preventDefault(); e.stopPropagation();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        if (elements.dropOverlay) elements.dropOverlay.classList.add('hidden');
+      }
+    });
+    chatArea.addEventListener('dragover', e => {
+      e.preventDefault(); e.stopPropagation();
+    });
+    chatArea.addEventListener('drop', e => {
+      e.preventDefault(); e.stopPropagation();
+      dragCounter = 0;
+      if (elements.dropOverlay) elements.dropOverlay.classList.add('hidden');
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      if (!state.activeContact) { pushNotice('Сначала выберите контакт', 'warn'); return; }
+      sendMedia(file).catch(err => pushNotice(err.message, 'warn'));
+    });
+  }
   elements.contactCodeInput.addEventListener('keydown', event => {
     if (event.key === 'Enter') { event.preventDefault(); handleContactSave(); }
   });
@@ -1106,20 +1192,24 @@ function wireEvents() {
   // Context menu actions
   if (elements.msgContextMenu) {
     elements.msgContextMenu.querySelectorAll('.context-item').forEach(item => {
-      item.addEventListener('click', () => {
+      item.onclick = e => {
+        e.stopPropagation();
         const action = item.dataset.action;
         const target = state.contextTarget;
-        hideContextMenu();
-        if (!target) return;
         if (action === 'reply') {
+          hideContextMenu();
           const text = target.payload.text || target.payload.name || '';
-          setReply(target.message.id, text);
+          setReply(msgKey(target.message), text);
         } else if (action === 'react') {
+          hideContextMenu();
           showReactionPicker(target.message);
         } else if (action === 'delete') {
-          if (confirm('Удалить это сообщение?')) deleteMessage(target.message.id);
+          // Native confirm must be called BEFORE we hide the context menu, otherwise mobile/safari browsers auto-abort it
+          const doDelete = confirm('Удалить это сообщение?');
+          hideContextMenu();
+          if (doDelete) deleteMessage(msgKey(target.message));
         }
-      });
+      };
     });
   }
 

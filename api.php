@@ -38,6 +38,7 @@ const ID_MAX_DIGITS = 15;
 const MAX_JSON_BYTES = 65536;
 const MAX_MESSAGE_CIPHERTEXT = 32768;
 const MAX_MESSAGE_NONCE = 128;
+const MAX_TOKEN_BYTES = 512;
 const MAX_DISPLAY_NAME = 64;
 
 const RATE_WINDOW_SECONDS = 60;
@@ -112,14 +113,10 @@ function validate_public_key(string $value, string $label): void
 
 function get_client_ip(): string
 {
-    $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? '';
-    if (!$ip && isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        $parts = explode(',', (string)$_SERVER['HTTP_X_FORWARDED_FOR']);
-        $ip = trim($parts[0] ?? '');
-    }
-    if (!$ip) {
-        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    }
+    // On shared hosting without an explicit trusted proxy known to PHP, 
+    // relying on X-Forwarded-For allows trivial rate-limit bypass.
+    // The web server (ISPmanager NGINX proxy) usually sets REMOTE_ADDR to the real client IP.
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
     return $ip ?: 'unknown';
 }
 
@@ -177,7 +174,7 @@ function apply_rate_limits(PDO $pdo, string $route, string $method): void
         rate_limit($pdo, $actor . ':msgget', RATE_MSG_GET, RATE_WINDOW_SECONDS);
         return;
     }
-    if (preg_match('#^/messages/\d+$#', $route) && $method === 'DELETE') {
+    if (preg_match('#^/messages/[a-f0-9]{32}$#', $route) && $method === 'DELETE') {
         rate_limit($pdo, $actor . ':msgdel', RATE_MSG_DELETE, RATE_WINDOW_SECONDS);
         return;
     }
@@ -211,9 +208,16 @@ function db(): PDO
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
     $pdo->exec('PRAGMA journal_mode=WAL;');
+    $pdo->exec('PRAGMA synchronous=NORMAL;'); // Optimize WAL concurrency
     $pdo->exec('PRAGMA foreign_keys=ON;');
-    init_db($pdo);
-    migrate_sequential_user_ids($pdo);
+
+    $version = (int)$pdo->query('PRAGMA user_version;')->fetchColumn();
+    if ($version < 1) {
+        init_db($pdo);
+        migrate_sequential_user_ids($pdo);
+        $pdo->exec('PRAGMA user_version = 1;');
+    }
+
     return $pdo;
 }
 
@@ -242,6 +246,7 @@ function init_db(PDO $pdo): void
     );');
     $pdo->exec('CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE,
         sender_id INTEGER NOT NULL,
         recipient_id INTEGER NOT NULL,
         ciphertext TEXT NOT NULL,
@@ -278,6 +283,10 @@ function init_db(PDO $pdo): void
     );');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id, id);');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient_id, id);');
+    // Migrate existing messages without uuid BEFORE creating indexes on the new column
+    migrate_message_uuids($pdo);
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_uuid ON messages(uuid);');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_uuid_unique ON messages(uuid);');
     $pdo->exec('CREATE TABLE IF NOT EXISTS reactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         message_id INTEGER NOT NULL,
@@ -289,6 +298,31 @@ function init_db(PDO $pdo): void
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);');
+}
+
+function migrate_message_uuids(PDO $pdo): void
+{
+    // Add uuid column if missing (for existing DBs)
+    try {
+        $pdo->exec('ALTER TABLE messages ADD COLUMN uuid TEXT');
+    }
+    catch (PDOException $e) {
+    // Column already exists, ignore
+    }
+    // Fill in any null uuids
+    try {
+        $stmt = $pdo->query('SELECT id FROM messages WHERE uuid IS NULL');
+        if ($stmt) {
+            $rows = $stmt->fetchAll();
+            foreach ($rows as $row) {
+                $uuid = bin2hex(random_bytes(16));
+                $pdo->prepare('UPDATE messages SET uuid = ? WHERE id = ?')->execute([$uuid, (int)$row['id']]);
+            }
+        }
+    }
+    catch (PDOException $e) {
+    // Ignore if structural error.
+    }
 }
 
 function id_needs_rotation(int $id): bool
@@ -371,7 +405,11 @@ function get_bearer_token(): ?string
         }
     }
     if ($header && stripos($header, 'Bearer ') === 0) {
-        return trim(substr($header, 7));
+        $token = trim(substr($header, 7));
+        if (strlen($token) > MAX_TOKEN_BYTES) {
+            return null;
+        }
+        return $token;
     }
     $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
     if (!$token && isset($_SERVER['REDIRECT_HTTP_X_AUTH_TOKEN'])) {
@@ -387,7 +425,11 @@ function get_bearer_token(): ?string
         }
     }
     if ($token) {
-        return trim($token);
+        $token = trim($token);
+        if (strlen($token) > MAX_TOKEN_BYTES) {
+            return null;
+        }
+        return $token;
     }
     return null;
 }
@@ -428,7 +470,19 @@ function handle_stream(PDO $pdo): void
     rate_limit($pdo, 'ip:' . $ip . ':global', RATE_GLOBAL, RATE_WINDOW_SECONDS);
     rate_limit($pdo, 'tok:' . $token . ':stream', RATE_STREAM, RATE_WINDOW_SECONDS);
     $user = get_user_by_token($pdo, $token);
-    $last = isset($_GET['since']) ? (int)$_GET['since'] : 0;
+    $sinceParam = isset($_GET['since']) ? (string)$_GET['since'] : '0';
+    $last = 0;
+    if ($sinceParam !== '' && $sinceParam !== '0') {
+        if (ctype_digit($sinceParam)) {
+            $last = (int)$sinceParam;
+        }
+        else {
+            $lookup = $pdo->prepare('SELECT id FROM messages WHERE uuid = ?');
+            $lookup->execute([$sinceParam]);
+            $found = $lookup->fetch();
+            $last = $found ? (int)$found['id'] : 0;
+        }
+    }
     header('Content-Type: text/event-stream');
     header('Cache-Control: no-store');
     header('Connection: keep-alive');
@@ -440,7 +494,7 @@ function handle_stream(PDO $pdo): void
         if (connection_aborted()) {
             break;
         }
-        $stmt = $pdo->prepare('SELECT id, sender_id, recipient_id, ciphertext, nonce, created_at
+        $stmt = $pdo->prepare('SELECT id, uuid, sender_id, recipient_id, ciphertext, nonce, created_at
             FROM messages
             WHERE (sender_id = :uid OR recipient_id = :uid) AND id > :last
             ORDER BY id ASC');
@@ -448,8 +502,11 @@ function handle_stream(PDO $pdo): void
         $rows = $stmt->fetchAll();
         foreach ($rows as $row) {
             $last = (int)$row['id'];
+            // Expose uuid externally, hide internal id
+            $external = $row;
+            unset($external['id']);
             echo "event: message\n";
-            echo 'data: ' . json_encode($row, JSON_UNESCAPED_UNICODE) . "\n\n";
+            echo 'data: ' . json_encode($external, JSON_UNESCAPED_UNICODE) . "\n\n";
         }
         echo "event: ping\n";
         echo "data: {}\n\n";
@@ -468,6 +525,21 @@ if ($apiPos === false && str_ends_with($path, '/api')) {
 }
 $apiPath = $apiPos === false ? $path : substr($path, $apiPos);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+// Method spoofing for environments blocking DELETE/PUT
+if ($method === 'POST') {
+    $spoof = $_GET['_method'] ?? $_POST['_method'] ?? '';
+    if (!$spoof) {
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+        if (strpos($contentType, 'application/json') !== false) {
+            $bodySpoof = parse_json_body(MAX_JSON_BYTES);
+            $spoof = $bodySpoof['_method'] ?? '';
+        }
+    }
+    if (strtoupper((string)$spoof) === 'DELETE') {
+        $method = 'DELETE';
+    }
+}
 
 if (strpos($apiPath, '/api/') !== 0) {
     $routeParam = $_GET['r'] ?? '';
@@ -505,7 +577,7 @@ $route = substr($apiPath, 4); // remove /api
 apply_rate_limits($pdo, $route, $method);
 
 if ($route === '/health' && $method === 'GET') {
-    json_response(['status' => 'ok', 'db' => $dbPath]);
+    json_response(['status' => 'ok']);
 }
 
 if ($route === '/register' && $method === 'POST') {
@@ -736,10 +808,10 @@ if ($route === '/messages' && $method === 'POST') {
         fail(404, 'Recipient not found');
     }
     $created = utcnow();
-    $pdo->prepare('INSERT INTO messages (sender_id, recipient_id, ciphertext, nonce, created_at) VALUES (?, ?, ?, ?, ?)')
-        ->execute([(int)$user['id'], $recipientId, $ciphertext, $nonce, $created]);
-    $id = (int)$pdo->lastInsertId();
-    json_response(['id' => $id]);
+    $uuid = bin2hex(random_bytes(16));
+    $pdo->prepare('INSERT INTO messages (uuid, sender_id, recipient_id, ciphertext, nonce, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        ->execute([$uuid, (int)$user['id'], $recipientId, $ciphertext, $nonce, $created]);
+    json_response(['uuid' => $uuid]);
 }
 
 if ($route === '/messages' && $method === 'GET') {
@@ -748,25 +820,39 @@ if ($route === '/messages' && $method === 'GET') {
     if ($with <= 0) {
         fail(400, 'with_user required');
     }
-    $since = isset($_GET['since']) ? (int)$_GET['since'] : 0;
-    $query = 'SELECT id, sender_id, recipient_id, ciphertext, nonce, created_at
+    $sinceUuid = isset($_GET['since']) ? (string)$_GET['since'] : '';
+    $sinceId = 0;
+    if ($sinceUuid !== '' && $sinceUuid !== '0') {
+        // Support both old numeric since and new uuid since
+        if (ctype_digit($sinceUuid)) {
+            $sinceId = (int)$sinceUuid;
+        }
+        else {
+            $lookup = $pdo->prepare('SELECT id FROM messages WHERE uuid = ?');
+            $lookup->execute([$sinceUuid]);
+            $found = $lookup->fetch();
+            $sinceId = $found ? (int)$found['id'] : 0;
+        }
+    }
+    $query = 'SELECT id, uuid, sender_id, recipient_id, ciphertext, nonce, created_at
         FROM messages
         WHERE ((sender_id = :me AND recipient_id = :with) OR (sender_id = :with AND recipient_id = :me))';
-    if ($since > 0) {
+    if ($sinceId > 0) {
         $query .= ' AND id > :since';
     }
     $query .= ' ORDER BY id ASC LIMIT 200';
     $stmt = $pdo->prepare($query);
     $params = [':me' => (int)$user['id'], ':with' => $with];
-    if ($since > 0) {
-        $params[':since'] = $since;
+    if ($sinceId > 0) {
+        $params[':since'] = $sinceId;
     }
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
 
     // Attach reactions to each message
     $messageIds = array_map(function ($r) {
-        return (int)$r['id']; }, $rows);
+        return (int)$r['id'];
+    }, $rows);
     $reactions = [];
     if ($messageIds) {
         $placeholders = implode(',', array_fill(0, count($messageIds), '?'));
@@ -781,6 +867,8 @@ if ($route === '/messages' && $method === 'GET') {
     }
     foreach ($rows as &$row) {
         $row['reactions'] = $reactions[(int)$row['id']] ?? [];
+        // Remove internal id, expose only uuid
+        unset($row['id']);
     }
     unset($row);
 
@@ -788,11 +876,11 @@ if ($route === '/messages' && $method === 'GET') {
 }
 
 // Delete message
-if (preg_match('#^/messages/(\d+)$#', $route, $m) && $method === 'DELETE') {
+if (preg_match('#^/messages/([a-f0-9]{32})$#', $route, $m) && $method === 'DELETE') {
     $user = require_user($pdo);
-    $msgId = (int)$m[1];
-    $stmt = $pdo->prepare('SELECT id, sender_id, recipient_id FROM messages WHERE id = ?');
-    $stmt->execute([$msgId]);
+    $msgUuid = $m[1];
+    $stmt = $pdo->prepare('SELECT id, sender_id, recipient_id FROM messages WHERE uuid = ?');
+    $stmt->execute([$msgUuid]);
     $msg = $stmt->fetch();
     if (!$msg) {
         fail(404, 'Message not found');
@@ -801,6 +889,7 @@ if (preg_match('#^/messages/(\d+)$#', $route, $m) && $method === 'DELETE') {
     if ($uid !== (int)$msg['sender_id'] && $uid !== (int)$msg['recipient_id']) {
         fail(403, 'Forbidden');
     }
+    $msgId = (int)$msg['id'];
     $pdo->prepare('DELETE FROM reactions WHERE message_id = ?')->execute([$msgId]);
     $pdo->prepare('DELETE FROM messages WHERE id = ?')->execute([$msgId]);
     json_response(['status' => 'ok']);
@@ -810,20 +899,22 @@ if (preg_match('#^/messages/(\d+)$#', $route, $m) && $method === 'DELETE') {
 if ($route === '/reactions' && $method === 'POST') {
     $user = require_user($pdo);
     $payload = parse_json_body();
-    $messageId = (int)($payload['message_id'] ?? 0);
+    $messageUuid = (string)($payload['message_id'] ?? '');
     $emoji = trim((string)($payload['emoji'] ?? ''));
-    if ($messageId <= 0 || $emoji === '') {
+    if ($messageUuid === '' || $emoji === '') {
         fail(400, 'message_id and emoji required');
     }
     if (mb_strlen($emoji) > 8) {
         fail(400, 'Emoji too long');
     }
-    $stmt = $pdo->prepare('SELECT id, sender_id, recipient_id FROM messages WHERE id = ?');
-    $stmt->execute([$messageId]);
+    // Look up by uuid
+    $stmt = $pdo->prepare('SELECT id, sender_id, recipient_id FROM messages WHERE uuid = ?');
+    $stmt->execute([$messageUuid]);
     $msg = $stmt->fetch();
     if (!$msg) {
         fail(404, 'Message not found');
     }
+    $messageId = (int)$msg['id'];
     $uid = (int)$user['id'];
     if ($uid !== (int)$msg['sender_id'] && $uid !== (int)$msg['recipient_id']) {
         fail(403, 'Forbidden');
@@ -846,16 +937,48 @@ if ($route === '/reactions' && $method === 'POST') {
 // Get reactions for a message
 if ($route === '/reactions' && $method === 'GET') {
     $user = require_user($pdo);
-    $messageId = isset($_GET['message_id']) ? (int)$_GET['message_id'] : 0;
-    if ($messageId <= 0) {
+    $messageUuid = isset($_GET['message_id']) ? (string)$_GET['message_id'] : '';
+    if ($messageUuid === '') {
         fail(400, 'message_id required');
     }
+    // Look up internal id from uuid
+    $lookup = $pdo->prepare('SELECT id FROM messages WHERE uuid = ?');
+    $lookup->execute([$messageUuid]);
+    $found = $lookup->fetch();
+    if (!$found) {
+        fail(404, 'Message not found');
+    }
+    $messageId = (int)$found['id'];
     $stmt = $pdo->prepare('SELECT id, message_id, user_id, emoji, created_at FROM reactions WHERE message_id = ? ORDER BY id ASC');
     $stmt->execute([$messageId]);
     json_response(['reactions' => $stmt->fetchAll()]);
 }
 
 
+
+// Dangerous MIME types that could execute in browser
+function sanitize_mime(string $mime): string
+{
+    $dangerous = [
+        'image/svg+xml', 'text/html', 'application/xhtml+xml',
+        'application/javascript', 'text/javascript', 'application/x-javascript',
+        'text/xml', 'application/xml',
+    ];
+    foreach ($dangerous as $d) {
+        if (stripos($mime, $d) !== false) {
+            return 'application/octet-stream';
+        }
+    }
+    return $mime;
+}
+
+function sanitize_filename(string $name): string
+{
+    // Remove path traversal and null bytes
+    $name = str_replace(['\0', '/', '\\', '..'], '', $name);
+    $name = trim($name);
+    return $name ?: 'file';
+}
 
 if ($route === '/media' && $method === 'POST') {
     $user = require_user($pdo);
@@ -874,19 +997,26 @@ if ($route === '/media' && $method === 'POST') {
     }
     $file = $_FILES['file'];
     if ($file['error'] !== UPLOAD_ERR_OK) {
-        fail(400, 'Upload failed');
+        $errorMessages = [
+            UPLOAD_ERR_INI_SIZE => 'Файл слишком большой (лимит сервера)',
+            UPLOAD_ERR_FORM_SIZE => 'Файл слишком большой',
+            UPLOAD_ERR_PARTIAL => 'Файл загружен частично',
+            UPLOAD_ERR_NO_FILE => 'Файл не загружен',
+        ];
+        $errMsg = $errorMessages[$file['error']] ?? 'Upload failed (code ' . $file['error'] . ')';
+        fail(400, $errMsg);
     }
-    $maxBytes = (int)(getenv('MESSANGER_MAX_MEDIA_BYTES') ?: 52428800);
+    $maxBytes = (int)(getenv('MESSANGER_MAX_MEDIA_BYTES') ?: 26214400); // 25MB default
     if ($file['size'] > $maxBytes) {
-        fail(413, 'File too large');
+        fail(413, 'Файл слишком большой (макс. ' . round($maxBytes / 1048576) . ' МБ)');
     }
     $mediaId = bin2hex(random_bytes(16));
     $target = $GLOBALS['MEDIA_DIR'] . DIRECTORY_SEPARATOR . $mediaId;
     if (!move_uploaded_file($file['tmp_name'], $target)) {
         fail(500, 'Failed to store media');
     }
-    $filename = $file['name'] ?: 'file';
-    $mime = $file['type'] ?: 'application/octet-stream';
+    $filename = sanitize_filename($file['name'] ?: 'file');
+    $mime = sanitize_mime($file['type'] ?: 'application/octet-stream');
     $pdo->prepare('INSERT INTO media (id, owner_id, recipient_id, filename, mime, size, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         ->execute([$mediaId, (int)$user['id'], $recipientId, $filename, $mime, (int)$file['size'], $target, utcnow()]);
     json_response([
@@ -900,7 +1030,7 @@ if ($route === '/media' && $method === 'POST') {
 if (preg_match('#^/media/([a-f0-9]{32})$#', $route, $m) && $method === 'GET') {
     $user = require_user($pdo);
     $mediaId = $m[1];
-    $stmt = $pdo->prepare('SELECT * FROM media WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, owner_id, recipient_id, filename, mime, size, path FROM media WHERE id = ?');
     $stmt->execute([$mediaId]);
     $row = $stmt->fetch();
     if (!$row) {
@@ -913,9 +1043,14 @@ if (preg_match('#^/media/([a-f0-9]{32})$#', $route, $m) && $method === 'GET') {
     if (!is_file($row['path'])) {
         fail(404, 'Media not found');
     }
-    header('Content-Type: ' . $row['mime']);
+    // Always force download to prevent XSS via SVG/HTML
+    $safeMime = sanitize_mime($row['mime']);
+    $safeFilename = sanitize_filename(basename($row['filename']));
+    header('Content-Type: ' . $safeMime);
     header('Content-Length: ' . $row['size']);
-    header('Content-Disposition: attachment; filename="' . basename($row['filename']) . '"');
+    header('Content-Disposition: attachment; filename="' . $safeFilename . '"');
+    header('X-Content-Type-Options: nosniff');
+    header('Content-Security-Policy: default-src \'none\'');
     readfile($row['path']);
     exit;
 }

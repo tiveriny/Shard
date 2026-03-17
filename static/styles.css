@@ -362,6 +362,20 @@ body.is-locked #app {
   opacity: 1;
 }
 
+.reaction-picker-popup {
+  position: fixed;
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  gap: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  max-width: 90vw;
+  overflow-x: auto;
+}
+
 /* ─── Cards ─── */
 .card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03));
@@ -1279,4 +1293,80 @@ h4 {
   .input-search {
     width: 100px;
   }
+}
+
+/* ─── Chat view position context ─── */
+.chat-view {
+  position: relative;
+}
+
+/* ─── Drop overlay ─── */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(42, 171, 238, 0.12);
+  border: 2px dashed rgba(82, 197, 255, 0.6);
+  border-radius: 18px;
+  backdrop-filter: blur(6px);
+  animation: dropPulse 1.2s ease infinite;
+  pointer-events: none;
+}
+
+.drop-overlay.hidden {
+  display: none;
+}
+
+.drop-overlay-content {
+  text-align: center;
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.drop-icon {
+  font-size: 36px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+@keyframes dropPulse {
+
+  0%,
+  100% {
+    border-color: rgba(82, 197, 255, 0.6);
+  }
+
+  50% {
+    border-color: rgba(82, 197, 255, 0.25);
+  }
+}
+
+/* ─── Upload processing overlay ─── */
+.upload-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(7, 9, 15, 0.82);
+  border-radius: 18px;
+  backdrop-filter: blur(10px);
+}
+
+.upload-overlay.hidden {
+  display: none;
+}
+
+.upload-text {
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
 }
