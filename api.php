@@ -12,6 +12,34 @@ header('Expires: 0');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: no-referrer');
 
+function normalize_lang(string $value): string
+{
+    $value = strtolower(trim($value));
+    return str_starts_with($value, 'ru') ? 'ru' : 'en';
+}
+
+function detect_request_lang(): string
+{
+    $explicit = $_SERVER['HTTP_X_SHARD_LANG'] ?? '';
+    if ($explicit !== '') {
+        return normalize_lang((string)$explicit);
+    }
+
+    $accept = (string)($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '');
+    foreach (explode(',', $accept) as $part) {
+        $tag = trim((string)explode(';', $part)[0]);
+        if ($tag !== '') {
+            return normalize_lang($tag);
+        }
+    }
+
+    return 'en';
+}
+
+$SHARD_LANG = detect_request_lang();
+header('Content-Language: ' . $SHARD_LANG);
+header('Vary: Accept-Language, X-Shard-Lang');
+
 $BASE_DIR = dirname(__FILE__);
 $DATA_DIR = $BASE_DIR . DIRECTORY_SEPARATOR . 'data';
 if (!is_dir($DATA_DIR)) {
@@ -52,7 +80,7 @@ const RATE_USER_LOOKUP = 60;
 const RATE_REACTIONS = 60;
 const RATE_MSG_DELETE = 30;
 const RATE_STREAM = 30;
-const SHARD_BUILD = 11;
+const SHARD_BUILD = 12;
 
 header('X-Shard-Build: ' . SHARD_BUILD);
 
@@ -64,9 +92,85 @@ function json_response($data, int $status = 200): void
     exit;
 }
 
+function translate_error_message(string $message): string
+{
+    global $SHARD_LANG;
+
+    $catalog = [
+        'ru' => [
+            'Payload too large' => 'Слишком большой запрос',
+            'Invalid JSON' => 'Некорректный JSON',
+            'Invalid base64 payload' => 'Некорректный base64 payload',
+            'Too many requests' => 'Слишком много запросов',
+            'Invalid token' => 'Неверный токен',
+            'Token expired' => 'Срок действия токена истек',
+            'Missing auth token' => 'Отсутствует auth token',
+            'Missing token' => 'Отсутствует токен',
+            'Not Found' => 'Не найдено',
+            'display_name required' => 'Поле display_name обязательно',
+            'display_name too long' => 'Поле display_name слишком длинное',
+            'User not registered' => 'Пользователь не зарегистрирован',
+            'Challenge not found' => 'Challenge не найден',
+            'Nonce mismatch' => 'Nonce не совпадает',
+            'Challenge expired' => 'Срок действия challenge истек',
+            'Sodium extension missing' => 'Расширение sodium недоступно',
+            'Invalid signature' => 'Неверная подпись',
+            'User not found' => 'Пользователь не найден',
+            'contact_id required' => 'Поле contact_id обязательно',
+            'Invalid payload' => 'Некорректный payload',
+            'Message too large' => 'Сообщение слишком большое',
+            'Invalid nonce' => 'Некорректный nonce',
+            'Recipient not found' => 'Получатель не найден',
+            'with_user required' => 'Параметр with_user обязателен',
+            'Message not found' => 'Сообщение не найдено',
+            'Forbidden' => 'Доступ запрещен',
+            'message_id and emoji required' => 'Поля message_id и emoji обязательны',
+            'Emoji too long' => 'Emoji слишком длинный',
+            'message_id required' => 'Поле message_id обязательно',
+            'recipient_id required' => 'Поле recipient_id обязательно',
+            'file required' => 'Файл обязателен',
+            'Failed to store media' => 'Не удалось сохранить медиафайл',
+            'Media not found' => 'Медиафайл не найден',
+        ],
+        'en' => [
+            'Файл слишком большой (лимит сервера)' => 'File is too large (server limit)',
+            'Файл слишком большой' => 'File is too large',
+            'Файл загружен частично' => 'File upload was incomplete',
+            'Файл не загружен' => 'No file was uploaded',
+        ],
+    ];
+
+    if (isset($catalog[$SHARD_LANG][$message])) {
+        return $catalog[$SHARD_LANG][$message];
+    }
+
+    if (preg_match('/^(.+) must be 32 bytes$/', $message, $matches)) {
+        if ($SHARD_LANG === 'ru') {
+            return 'Поле ' . $matches[1] . ' должно быть размером 32 байта';
+        }
+        return $message;
+    }
+
+    if (preg_match('/^Upload failed \(code (\d+)\)$/', $message, $matches)) {
+        if ($SHARD_LANG === 'ru') {
+            return 'Загрузка не удалась (код ' . $matches[1] . ')';
+        }
+        return $message;
+    }
+
+    if (preg_match('/^Файл слишком большой \(макс\. ([0-9.]+) МБ\)$/u', $message, $matches)) {
+        if ($SHARD_LANG === 'en') {
+            return 'File is too large (max. ' . $matches[1] . ' MB)';
+        }
+        return $message;
+    }
+
+    return $message;
+}
+
 function fail(int $status, string $message): void
 {
-    json_response(['detail' => $message], $status);
+    json_response(['detail' => translate_error_message($message)], $status);
 }
 
 function utcnow(): string

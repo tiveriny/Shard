@@ -1,16 +1,16 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="shard-build" content="14" />
+  <meta name="shard-build" content="21" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <base href="./" />
-  <title>Shard — Приватные диалоги</title>
-  <link rel="stylesheet" href="static/styles.css?v=shard-20" />
+  <title>Shard - Private conversations</title>
+  <link rel="stylesheet" href="static/styles.css?v=shard-21" />
   <link rel="icon" href="static/favicon.svg" type="image/svg+xml" />
 </head>
 
@@ -22,12 +22,55 @@
     <div class="grain"></div>
     <div class="vignette"></div>
   </div>
+
   <div class="version-badge">v 0.1</div>
 
-  <!-- Loading overlay -->
+  <div id="floatingLangSwitch" class="floating-lang-switch" role="group" aria-label="language switcher">
+    <span class="floating-lang-switch__label" data-i18n="lang.switchLabel">Language</span>
+    <button id="langSwitchEn" class="lang-chip" type="button">EN</button>
+    <button id="langSwitchRu" class="lang-chip" type="button">RU</button>
+  </div>
+
   <div id="loadingOverlay" class="loading-overlay hidden">
     <div class="loading-spinner"></div>
-    <p class="loading-text">Инициализация…</p>
+    <p class="loading-text" data-i18n="loading.initializing">Initializing...</p>
+  </div>
+
+  <div id="languageModal" class="modal modal--language">
+    <div class="modal-card language-card">
+      <div class="modal-head language-head">
+        <p class="label">Language / Язык</p>
+        <h2 data-i18n="lang.modalTitle">Choose your language</h2>
+        <p class="muted" data-i18n="lang.modalBody">We detected a recommended language from your browser settings. Please confirm your choice before continuing.</p>
+      </div>
+
+      <div id="languageRecommendation" class="language-recommendation"></div>
+
+      <div class="language-options">
+        <button id="langOptionEn" class="language-option" type="button">
+          <span class="language-option__code">EN</span>
+          <span class="language-option__body">
+            <strong data-i18n="lang.optionEnTitle">English</strong>
+            <span data-i18n="lang.optionEnBody">Interface, notifications, and docs in English.</span>
+          </span>
+        </button>
+        <button id="langOptionRu" class="language-option" type="button">
+          <span class="language-option__code">RU</span>
+          <span class="language-option__body">
+            <strong data-i18n="lang.optionRuTitle">Русский</strong>
+            <span data-i18n="lang.optionRuBody">Интерфейс, уведомления и документация на русском.</span>
+          </span>
+        </button>
+      </div>
+
+      <div class="modal-actions">
+        <button id="languageConfirmBtn" class="primary" type="button" data-i18n="lang.confirm">Confirm and continue</button>
+      </div>
+
+      <div class="modal-foot">
+        <p class="muted" data-i18n="lang.modalFoot">You can change the language at any time.</p>
+      </div>
+    </div>
   </div>
 
   <main class="wrap">
@@ -37,80 +80,81 @@
           <span class="brand-dot"></span>
           <div class="brand-text">
             <span class="brand-title">Shard <span class="brand-ver">v0.1</span></span>
-            <span class="brand-sub">Private. Minimal. Secure.</span>
+            <span class="brand-sub" data-i18n="brand.subtitle">Private. Minimal. Experimental.</span>
           </div>
         </div>
         <div class="top-actions">
-          <span id="sessionStatus" class="pill pill--status" data-state="locked">Сессия заблокирована</span>
-          <button id="lockBtn" class="ghost">Заблокировать</button>
+          <span id="sessionStatus" class="pill pill--status" data-state="locked" data-i18n="session.locked">Session locked</span>
+          <button id="lockBtn" class="ghost" type="button" data-i18n="session.lockButton">Lock</button>
         </div>
       </header>
+
+      <div class="project-disclaimer">
+        <div class="project-disclaimer__badge" data-i18n="disclaimer.badge">Experimental project</div>
+        <p id="projectDisclaimerText" class="project-disclaimer__text" data-i18n="disclaimer.text">This is an experimental project. Not audited. Do not use for critical security needs.</p>
+        <p id="projectDisclaimerOriginal" class="project-disclaimer__original">This is an experimental project. Not audited. Do not use for critical security needs.</p>
+      </div>
 
       <div class="shell">
         <aside class="sidebar">
           <section class="card me-card">
             <div class="me-head">
               <div>
-                <p class="label">Вы</p>
-                <h2 id="meName">Без имени</h2>
+                <p class="label" data-i18n="profile.you">You</p>
+                <h2 id="meName" data-i18n="profile.unnamed">Unnamed</h2>
               </div>
-              <button id="copyContact" class="ghost">Скопировать ID</button>
+              <button id="copyContact" class="ghost" type="button" data-i18n="profile.copyId">Copy ID</button>
             </div>
-            <p class="muted" id="meId">Сессия не активна</p>
+            <p class="muted" id="meId" data-i18n="profile.sessionInactive">Session inactive</p>
           </section>
 
-          <!-- Tabs -->
           <div class="sidebar-tabs">
-            <button class="tab-btn active" data-tab="contacts">Контакты</button>
-            <button class="tab-btn" data-tab="security">Новости и 🔐 Безопасность</button>
+            <button class="tab-btn active" type="button" data-tab="contacts" data-i18n="tabs.contacts">Contacts</button>
+            <button class="tab-btn" type="button" data-tab="security" data-i18n="tabs.security">News and Security</button>
           </div>
 
-          <!-- Contacts Tab (sidebar only) -->
           <section id="tabContacts" class="card tab-content active">
             <div class="section-head">
-              <h3>Контакты</h3>
+              <h3 data-i18n="contacts.title">Contacts</h3>
             </div>
             <div id="chatSearchGlobal" class="search-global">
-              <input id="globalSearchInput" type="search" placeholder="Поиск по контактам…"
-                class="input-ghost input-sm" />
+              <input id="globalSearchInput" type="search" class="input-ghost input-sm" data-i18n-placeholder="contacts.searchPlaceholder" placeholder="Search contacts..." />
             </div>
-            <p class="muted tiny">Добавляйте по числовому ID.</p>
+            <p class="muted tiny" data-i18n="contacts.hint">Add contacts by numeric ID.</p>
             <div id="contacts" class="contact-list"></div>
-            <div id="contactsEmpty" class="muted tiny">Пока пусто — добавьте первый контакт.</div>
+            <div id="contactsEmpty" class="muted tiny" data-i18n="contacts.empty">No contacts yet. Add your first contact.</div>
             <div class="contact-add">
-              <input id="contactCodeInput" type="text" placeholder="Введите числовой ID контакта" />
-              <button id="saveContact" class="primary">Добавить контакт</button>
+              <input id="contactCodeInput" type="text" data-i18n-placeholder="contacts.inputPlaceholder" placeholder="Enter a numeric contact ID" />
+              <button id="saveContact" class="primary" type="button" data-i18n="contacts.addButton">Add contact</button>
             </div>
           </section>
         </aside>
 
         <main class="chat">
-          <!-- Empty state -->
           <div id="emptyState" class="empty">
             <div class="empty-card">
-              <h2>Начните защищённый диалог</h2>
-              <p class="muted">Только участники чата могут читать сообщения. Без логинов и паролей.</p>
+              <h2 data-i18n="empty.title">Start a secure conversation</h2>
+              <p class="muted" data-i18n="empty.body">Only chat participants can read messages. No logins. No passwords.</p>
               <ol class="steps">
-                <li><span class="step-number">1</span>Скопируйте свой ID</li>
-                <li><span class="step-number">2</span>Получите ID контакта</li>
-                <li><span class="step-number">3</span>Начните переписку</li>
+                <li><span class="step-number">1</span><span data-i18n="empty.step1">Copy your ID</span></li>
+                <li><span class="step-number">2</span><span data-i18n="empty.step2">Get a contact ID</span></li>
+                <li><span class="step-number">3</span><span data-i18n="empty.step3">Start chatting</span></li>
               </ol>
             </div>
             <div class="empty-actions">
-              <button id="copyContactSecondary" class="primary">Скопировать мой ID</button>
-              <button id="focusContactInput" class="ghost">Добавить контакт</button>
+              <button id="copyContactSecondary" class="primary" type="button" data-i18n="empty.copyMyId">Copy my ID</button>
+              <button id="focusContactInput" class="ghost" type="button" data-i18n="empty.addContact">Add contact</button>
             </div>
           </div>
 
-          <!-- Chat view -->
           <div id="chatView" class="chat-view hidden">
             <div class="chat-head">
               <div>
-                <p class="label">Диалог</p>
-                <h2 id="chatName">—</h2>
+                <p class="label" data-i18n="chat.label">Conversation</p>
+                <h2 id="chatName">-</h2>
               </div>
               <div class="chat-actions">
-                <input id="chatSearch" class="input-ghost input-search" type="search" placeholder="Поиск…" />
+                <input id="chatSearch" class="input-ghost input-search" type="search" data-i18n-placeholder="chat.searchPlaceholder" placeholder="Search..." />
                 <span class="pill" id="chatStatus">E2E • Offline</span>
               </div>
             </div>
@@ -119,228 +163,32 @@
 
             <div id="replyPreview" class="reply-preview hidden">
               <div class="reply-text" id="replyText"></div>
-              <button id="replyCancel" class="ghost">Отменить</button>
+              <button id="replyCancel" class="ghost" type="button" data-i18n="chat.cancelReply">Cancel</button>
             </div>
 
             <div class="composer">
-              <label id="filePill" class="file-pill" for="fileInput">+ Медиа</label>
+              <label id="filePill" class="file-pill" for="fileInput" data-i18n="chat.mediaButton">+ Media</label>
               <input id="fileInput" type="file" hidden />
-              <input id="messageInput" type="text" placeholder="Напишите сообщение" />
-              <button id="sendBtn" class="primary">Отправить</button>
+              <input id="messageInput" type="text" data-i18n-placeholder="chat.messagePlaceholder" placeholder="Write a message" />
+              <button id="sendBtn" class="primary" type="button" data-i18n="chat.send">Send</button>
             </div>
 
-            <!-- Drop overlay -->
             <div id="dropOverlay" class="drop-overlay hidden">
               <div class="drop-overlay-content">
                 <span class="drop-icon">📎</span>
-                <p>Перетащите файл сюда</p>
+                <p data-i18n="chat.dropHere">Drop a file here</p>
               </div>
             </div>
 
-            <!-- Upload processing overlay -->
             <div id="uploadOverlay" class="upload-overlay hidden">
               <div class="loading-spinner"></div>
-              <p class="upload-text">Обработка файла…</p>
+              <p class="upload-text" data-i18n="chat.uploading">Processing file...</p>
             </div>
           </div>
 
-          <!-- Security view (shown in chat area when security tab is active) -->
           <div id="securityView" class="security-view hidden">
             <div class="security-scroll">
-              <h2>🔐 Про безопасность и обновления</h2>
-              <div class="security-content">
-                <h4>Новости</h4>
-                <p>Shard v 0.1.11. Что нового?</p>
-                <p>Версия 0.1.11 от 10.03.2026 включает в себя несколько улучшений и исправлений.</p>
-                <p>1. В новом обновлении закрыто 8 слабых мест.</p>
-                <p>2. Восстановлена функция отправки медиа(Drag And Drop)</p>
-                <p>3. Скорость отправки и доставки сообщений увеличена втрое.</p>
-                <p>Следите за новыми обновлениями!</p>
-
-                <h4>Обзор архитектуры</h4>
-                <p>Shard — мессенджер со сквозным (end-to-end) шифрованием. Сервер <strong>никогда</strong> не видит
-                  открытый текст сообщений, медиафайлов или реакций. Ниже — полная техническая картина.</p>
-
-                <h4>📦 Криптографические библиотеки</h4>
-                <ul>
-                  <li><strong>TweetNaCl.js</strong> (nacl.min.js) — порт библиотеки NaCl (Networking and Cryptography
-                    Library) Дэниела Бернштейна на JavaScript. Работает целиком в браузере.</li>
-                  <li><strong>nacl-util</strong> — утилиты кодирования Base64 ↔ Uint8Array.</li>
-                  <li><strong>Web Crypto API</strong> — встроенный в браузер модуль для PBKDF2, HKDF и SHA-256/SHA-512.
-                  </li>
-                </ul>
-
-                <h4>🔑 Генерация ключей</h4>
-                <ol>
-                  <li><strong>Энтропия</strong>: 128 бит (16 байт) от <code>crypto.getRandomValues()</code> (CSPRNG
-                    браузера).</li>
-                  <li><strong>Мнемоника</strong>: 12 слов по стандарту BIP-39, включая контрольную сумму SHA-256.</li>
-                  <li><strong>Seed</strong>: мнемоника → PBKDF2 (2048 итераций, SHA-512, соль «mnemonic») → 512 бит.
-                  </li>
-                  <li><strong>Signing key</strong>: HKDF(seed, «messanger-sign», «messanger», 32 байта) →
-                    <code>Ed25519</code> ключевая пара.
-                  </li>
-                  <li><strong>Box key</strong>: HKDF(seed, «messanger-box», «messanger», 32 байта) →
-                    <code>Curve25519</code> ключевая пара.
-                  </li>
-                </ol>
-
-                <h4>✍️ Аутентификация</h4>
-                <ol>
-                  <li>Клиент отправляет <code>sign_public_key</code> + <code>box_public_key</code> на
-                    <code>/register</code>.
-                  </li>
-                  <li>Сервер генерирует одноразовый nonce (32 байта) и сохраняет challenge.</li>
-                  <li>Клиент подписывает nonce через <code>nacl.sign.detached()</code> (Ed25519).</li>
-                  <li>Сервер проверяет подпись через <code>sodium_crypto_sign_verify_detached()</code> (PHP libsodium).
-                  </li>
-                  <li>При успехе — выдаётся сессионный токен (256 бит, base64). Секретный ключ <strong>никогда</strong>
-                    не покидает устройство.</li>
-                </ol>
-
-                <h4>💬 Шифрование сообщений</h4>
-                <ul>
-                  <li>Алгоритм: <strong>NaCl Box</strong> = <code>XSalsa20-Poly1305</code> + обмен ключами
-                    <code>Curve25519</code> (Diffie-Hellman).
-                  </li>
-                  <li>Каждое сообщение шифруется уникальным 24-байтным nonce от <code>nacl.randomBytes()</code>.</li>
-                  <li>Ciphertext + nonce отправляются на сервер. Сервер хранит <strong>только шифротекст</strong> — без
-                    ключей дешифровка невозможна.</li>
-                  <li>Для самопереписки используется тот же механизм: шифрование собственным box-ключом.</li>
-                </ul>
-
-                <h4>📎 Шифрование медиа</h4>
-                <ul>
-                  <li>Алгоритм: <strong>NaCl SecretBox</strong> = <code>XSalsa20-Poly1305</code> (симметричное
-                    шифрование).</li>
-                  <li>Для каждого файла генерируется симметричный ключ (32 байта) и nonce (24 байта).</li>
-                  <li>Файл шифруется <code>nacl.secretbox()</code> и загружается на сервер в зашифрованном виде.</li>
-                  <li>Ключ и nonce медиа передаются внутри E2E-шифрованного сообщения (NaCl Box), поэтому сервер видит
-                    только blob зашифрованного файла.</li>
-                </ul>
-
-                <h4>😄 Реакции</h4>
-                <p>Реакции хранятся на сервере как эмодзи и привязаны к ID сообщения. Только участники диалога могут
-                  ставить и видеть реакции.</p>
-
-                <h4>🗑️ Удаление сообщений</h4>
-                <p>Удаление доступно обоим участникам. При удалении сообщение полностью стирается из базы вместе со
-                  всеми реакциями.</p>
-
-                <h4>🛡️ Что сервер знает / НЕ знает</h4>
-                <table class="security-table">
-                  <thead>
-                    <tr>
-                      <th>Данные</th>
-                      <th>На сервере</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Публичные ключи</td>
-                      <td>✅ Да</td>
-                    </tr>
-                    <tr>
-                      <td>Приватные ключи</td>
-                      <td>❌ Нет — только на устройстве</td>
-                    </tr>
-                    <tr>
-                      <td>Текст сообщений</td>
-                      <td>❌ Только ciphertext</td>
-                    </tr>
-                    <tr>
-                      <td>Медиафайлы</td>
-                      <td>❌ Только зашифрованный blob</td>
-                    </tr>
-                    <tr>
-                      <td>Мнемоника</td>
-                      <td>❌ Нет</td>
-                    </tr>
-                    <tr>
-                      <td>Сессионные токены</td>
-                      <td>✅ Для аутентификации запросов</td>
-                    </tr>
-                    <tr>
-                      <td>ID пользователей</td>
-                      <td>✅ 10-15 значный случайный номер</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                <h4>⚙️ Стек технологий</h4>
-                <ul>
-                  <li><strong>Frontend</strong>: Vanilla JS, TweetNaCl.js, Web Crypto API</li>
-                  <li><strong>Backend</strong>: PHP 8+ с расширением <code>sodium</code>, SQLite (WAL mode)</li>
-                  <li><strong>Транспорт</strong>: SSE (Server-Sent Events) для realtime, polling как fallback</li>
-                  <li><strong>Хранилище ключей</strong>: <code>localStorage</code> / <code>sessionStorage</code> (по
-                    выбору пользователя)</li>
-                </ul>
-
-                <h4>🔒 Итог</h4>
-                <p>Даже при полном доступе к серверу и базе данных атакующий увидит только: публичные ключи,
-                  зашифрованные сообщения (ciphertext + nonce) и зашифрованные медиафайлы. Без мнемоники пользователя
-                  расшифровать данные <strong>математически невозможно</strong>.</p>
-
-                <div class="security-ps">
-                  <h4>📜 P.S. Почему взломать Shard невозможно — математическое доказательство</h4>
-
-                  <p>Допустим, атакующий получил <strong>полный дамп сервера</strong>: базу данных, все зашифрованные
-                    сообщения, nonce&#8217;ы, публичные ключи, медиафайлы и токены. Может ли он прочитать хотя бы одно
-                    сообщение? <strong>Нет.</strong> Вот почему:</p>
-
-                  <p><strong>1. Проблема дискретного логарифма на Curve25519.</strong>
-                    Сообщения зашифрованы с помощью <code>nacl.box()</code>, который реализует Diffie-Hellman на
-                    эллиптической кривой Curve25519. Чтобы восстановить shared secret, атакующему нужно решить задачу
-                    дискретного логарифма на эллиптической кривой (ECDLP): зная точку <code>Q = d × G</code>, найти
-                    скаляр <code>d</code>. Лучшие известные алгоритмы (ро-метод Полларда) требуют порядка
-                    <code>2^128</code> операций — это <strong>3.4 × 10^38</strong> вычислений. Даже если объединить все
-                    суперкомпьютеры мира (≈ 10^18 операций/сек), потребуется ≈ <strong>10^13 лет</strong> — это тысячи
-                    возрастов Вселенной.
-                  </p>
-
-                  <p><strong>2. XSalsa20 — потоковый шифр с 256-битным ключом.</strong>
-                    После получения shared secret сообщение шифруется XSalsa20 с 256-битным ключом и 192-битным nonce.
-                    Пространство ключей: <code>2^256 ≈ 1.16 × 10^77</code>. Для brute-force потребовалось бы больше
-                    энергии, чем содержит наблюдаемая Вселенная (предел Ландауэра: стирание одного бита при T = 3K ≈ 3 ×
-                    10^-23 Дж; стирание 2^256 бит ≈ 10^54 Дж; энергия Солнца за всё время существования ≈ 10^43 Дж).</p>
-
-                  <p><strong>3. Poly1305 — аутентификация сообщений.</strong>
-                    Каждое сообщение содержит 128-битный MAC (Poly1305), привязанный к сессионному ключу. Без знания
-                    ключа невозможно ни подменить, ни подделать сообщение. Вероятность случайного совпадения:
-                    <code>1 / 2^128 ≈ 2.9 × 10^-39</code>.
-                  </p>
-
-                  <p><strong>4. Уникальный nonce.</strong>
-                    Каждое сообщение использует 24-байтный (192 бит) случайный nonce. Даже при отправке триллионов
-                    сообщений вероятность коллизии пренебрежимо мала (Birthday paradox: столкновение после ≈
-                    <code>2^96</code> сообщений ≈ 7.9 × 10^28).
-                  </p>
-
-                  <p><strong>5. Квантовые компьютеры?</strong>
-                    Алгоритм Шора угрожает RSA и классическим DH, но <strong>не</strong> NaCl. Для Curve25519 алгоритм
-                    Гровера сокращает стойкость до ~128 бит — это по-прежнему за пределами любых вычислительных
-                    мощностей. Кроме того, реальных криптографически значимых квантовых компьютеров <strong>не
-                      существует на 2025 год</strong> и ожидаемые сроки их появления — <strong>не ранее
-                      2040–2050</strong>.</p>
-
-                  <p><strong>6. Нет server-side ключей.</strong>
-                    Shard не хранит ключи. Вообще.
-
-                    В отличие от Telegram (ключи на сервере) и WhatsApp (ключи в облаке для бэкапов), Shard не имеет
-                    доступа к вашим секретам. Мнемоника живет только у вас. Сервер видит только публичные ключи и
-                    шифротекст.
-
-                    Если завтра сервер Shard взломают — атакующий увидит ноль полезной информации. Ваши сообщения были и
-                    останутся только вашими. Навсегда.</p>
-
-                  <p><strong>Вывод:</strong> Для расшифровки одного сообщения Shard атакующему необходимо либо (a)
-                    решить ECDLP на Curve25519 (~2^128 операций), либо (b) полный перебор 256-битного ключа XSalsa20
-                    (~2^256 операций), либо (c) получить физический доступ к устройству жертвы с разблокированным
-                    браузером. Варианты (a) и (b) признаны математическим сообществом <strong>вычислительно
-                      невозможными</strong> при текущем и прогнозируемом уровне технологий. Вариант (c) — это вопрос
-                    физической безопасности, а не криптографии.</p>
-                </div>
-              </div>
+              <div id="securityContent" class="security-content"></div>
             </div>
           </div>
         </main>
@@ -348,47 +196,52 @@
     </div>
   </main>
 
-  <div id="authModal" class="modal">
+  <div id="authModal" class="modal hidden">
     <div class="modal-card">
       <div class="modal-head">
-        <h2>Введите 12‑словную мнемонику</h2>
-        <p class="muted">Это ваш единственный ключ. Храните офлайн.</p>
+        <h2 data-i18n="auth.title">Enter your 12-word mnemonic</h2>
+        <p class="muted" data-i18n="auth.subtitle">This is your only key. Store it offline.</p>
       </div>
 
-      <div id="autoLogoutBanner" class="auto-logout hidden">Сессия завершена автоматически при обновлении страницы.
-        Войдите снова.</div>
+      <div id="autoLogoutBanner" class="auto-logout hidden" data-i18n="auth.autoLogout">Your session ended automatically after a page reload. Sign in again.</div>
 
       <div class="modal-body">
-        <label class="label">Мнемоника</label>
-        <textarea id="mnemonicInput" rows="3" placeholder="12 слов, разделённых пробелами"></textarea>
+        <div class="warning-card warning-card--compact">
+          <div class="warning-card__title" data-i18n="disclaimer.badge">Experimental project</div>
+          <p class="warning-card__text" data-i18n="disclaimer.text">This is an experimental project. Not audited. Do not use for critical security needs.</p>
+          <p class="warning-card__original" data-i18n="disclaimer.original">This is an experimental project. Not audited. Do not use for critical security needs.</p>
+        </div>
+
+        <label class="label" for="mnemonicInput" data-i18n="auth.mnemonicLabel">Mnemonic</label>
+        <textarea id="mnemonicInput" rows="3" data-i18n-placeholder="auth.mnemonicPlaceholder" placeholder="12 English words separated by spaces"></textarea>
         <div class="modal-actions">
-          <button id="generateBtn" class="ghost">Сгенерировать</button>
-          <button id="unlockBtn" class="primary">Войти</button>
+          <button id="generateBtn" class="ghost" type="button" data-i18n="auth.generate">Generate</button>
+          <button id="unlockBtn" class="primary" type="button" data-i18n="auth.unlock">Unlock</button>
         </div>
 
         <div id="generatedBox" class="generated hidden">
-          <h4>Запишите эти слова сейчас</h4>
+          <h4 data-i18n="auth.generatedTitle">Write these words down now</h4>
           <p id="generatedMnemonic" class="mnemonic"></p>
-          <button id="copyMnemonic" class="ghost">Скопировать</button>
+          <button id="copyMnemonic" class="ghost" type="button" data-i18n="auth.copyMnemonic">Copy mnemonic</button>
         </div>
 
         <div class="profile">
-          <label class="label">Имя</label>
-          <input id="displayNameInput" type="text" placeholder="Ваше имя" />
-          <p class="muted tiny">⚠️ Имя задаётся <strong>только при регистрации</strong> и не может быть изменено.</p>
+          <label class="label" for="displayNameInput" data-i18n="auth.nameLabel">Name</label>
+          <input id="displayNameInput" type="text" data-i18n-placeholder="auth.namePlaceholder" placeholder="Your name" />
+          <p class="muted tiny" data-i18n="auth.nameHint">Your name is set only at registration and cannot be changed later.</p>
           <label class="checkbox">
             <input id="rememberToggle" type="checkbox" />
-            Запомнить мнемонику на этом устройстве
+            <span data-i18n="auth.rememberMnemonic">Remember the mnemonic on this device</span>
           </label>
           <label class="checkbox">
             <input id="staySignedToggle" type="checkbox" />
-            Не выходить на этом устройстве
+            <span data-i18n="auth.staySigned">Stay signed in on this device</span>
           </label>
         </div>
       </div>
 
       <div class="modal-foot">
-        <p class="muted">Без паролей. Без восстановления. Только ваши слова.</p>
+        <p class="muted" data-i18n="auth.footer">No passwords. No recovery. Only your words.</p>
       </div>
     </div>
   </div>
@@ -401,28 +254,28 @@
   </div>
 
   <div id="msgContextMenu" class="context-menu hidden">
-    <button class="context-item" data-action="reply">↩️ Ответить</button>
-    <button class="context-item" data-action="react">😊 Реакция</button>
-    <button class="context-item context-item--danger" data-action="delete">🗑️ Удалить</button>
+    <button class="context-item" type="button" data-action="reply" data-i18n="context.reply">Reply</button>
+    <button class="context-item" type="button" data-action="react" data-i18n="context.react">Reaction</button>
+    <button class="context-item context-item--danger" type="button" data-action="delete" data-i18n="context.delete">Delete</button>
   </div>
 
   <div id="reactionPicker" class="reaction-picker-popup hidden">
-    <button class="rpick" data-emoji="👍">👍</button>
-    <button class="rpick" data-emoji="❤️">❤️</button>
-    <button class="rpick" data-emoji="😂">😂</button>
-    <button class="rpick" data-emoji="😮">😮</button>
-    <button class="rpick" data-emoji="😢">😢</button>
-    <button class="rpick" data-emoji="🔥">🔥</button>
-    <button class="rpick" data-emoji="👎">👎</button>
-    <button class="rpick" data-emoji="🎉">🎉</button>
+    <button class="rpick" type="button" data-emoji="👍">👍</button>
+    <button class="rpick" type="button" data-emoji="❤️">❤️</button>
+    <button class="rpick" type="button" data-emoji="😂">😂</button>
+    <button class="rpick" type="button" data-emoji="😮">😮</button>
+    <button class="rpick" type="button" data-emoji="😢">😢</button>
+    <button class="rpick" type="button" data-emoji="🔥">🔥</button>
+    <button class="rpick" type="button" data-emoji="👎">👎</button>
+    <button class="rpick" type="button" data-emoji="🎉">🎉</button>
   </div>
 
-  <div id="toast" class="toast hidden" role="status" aria-live="polite">Скопировано</div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="inAppNotifications" class="inapp-notifications" aria-live="polite"></div>
 
-  <script src="static/vendor/nacl.min.js?v=shard-20"></script>
-  <script src="static/vendor/nacl-util.min.js?v=shard-20"></script>
-  <script src="static/app.js?v=shard-20"></script>
+  <script src="static/vendor/nacl.min.js?v=shard-21"></script>
+  <script src="static/vendor/nacl-util.min.js?v=shard-21"></script>
+  <script src="static/app.js?v=shard-21"></script>
 </body>
 
 </html>
