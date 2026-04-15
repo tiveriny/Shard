@@ -80,7 +80,10 @@ const RATE_USER_LOOKUP = 60;
 const RATE_REACTIONS = 60;
 const RATE_MSG_DELETE = 30;
 const RATE_STREAM = 30;
-const SHARD_BUILD = 12;
+const RATE_PAIR_CODE = 30;
+const PAIR_CODE_TTL_SECONDS = 600;
+const PAIR_CODE_LENGTH = 6;
+const SHARD_BUILD = 13;
 
 header('X-Shard-Build: ' . SHARD_BUILD);
 
@@ -131,6 +134,9 @@ function translate_error_message(string $message): string
             'file required' => 'Файл обязателен',
             'Failed to store media' => 'Не удалось сохранить медиафайл',
             'Media not found' => 'Медиафайл не найден',
+            'pair code required' => 'Код подключения обязателен',
+            'Pair code not found' => 'Код подключения не найден или истек',
+            'Cannot redeem your own pair code' => 'Нельзя активировать свой собственный код подключения',
         ],
         'en' => [
             'Файл слишком большой (лимит сервера)' => 'File is too large (server limit)',
@@ -294,6 +300,10 @@ function apply_rate_limits(PDO $pdo, string $route, string $method): void
         rate_limit($pdo, $actor . ':userlookup', RATE_USER_LOOKUP, RATE_WINDOW_SECONDS);
         return;
     }
+    if (($route === '/pair-codes' || $route === '/pair-codes/redeem') && $method === 'POST') {
+        rate_limit($pdo, $actor . ':paircode', RATE_PAIR_CODE, RATE_WINDOW_SECONDS);
+        return;
+    }
     if ($route === '/reactions' && ($method === 'POST' || $method === 'GET')) {
         rate_limit($pdo, $actor . ':reactions', RATE_REACTIONS, RATE_WINDOW_SECONDS);
         return;
@@ -319,7 +329,12 @@ function db(): PDO
     if ($version < 1) {
         init_db($pdo);
         migrate_sequential_user_ids($pdo);
+        $version = 1;
         $pdo->exec('PRAGMA user_version = 1;');
+    }
+    if ($version < 2) {
+        migrate_pair_codes_schema($pdo);
+        $pdo->exec('PRAGMA user_version = 2;');
     }
 
     return $pdo;
@@ -402,6 +417,71 @@ function init_db(PDO $pdo): void
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS pair_codes (
+        code TEXT PRIMARY KEY,
+        owner_id INTEGER NOT NULL,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+    );');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pair_codes_owner ON pair_codes(owner_id);');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pair_codes_expires ON pair_codes(expires_at);');
+}
+
+function migrate_pair_codes_schema(PDO $pdo): void
+{
+    $pdo->exec('CREATE TABLE IF NOT EXISTS pair_codes (
+        code TEXT PRIMARY KEY,
+        owner_id INTEGER NOT NULL,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+    );');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pair_codes_owner ON pair_codes(owner_id);');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pair_codes_expires ON pair_codes(expires_at);');
+}
+
+function cleanup_pair_codes(PDO $pdo): void
+{
+    $pdo->prepare('DELETE FROM pair_codes WHERE expires_at <= ?')->execute([utcnow()]);
+}
+
+function generate_pair_code(PDO $pdo): string
+{
+    $alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    $maxIndex = strlen($alphabet) - 1;
+    while (true) {
+        $code = '';
+        for ($i = 0; $i < PAIR_CODE_LENGTH; $i++) {
+            $code .= $alphabet[random_int(0, $maxIndex)];
+        }
+        $stmt = $pdo->prepare('SELECT 1 FROM pair_codes WHERE code = ?');
+        $stmt->execute([$code]);
+        if (!$stmt->fetchColumn()) {
+            return $code;
+        }
+    }
+}
+
+function create_pair_code(PDO $pdo, int $ownerId): array
+{
+    cleanup_pair_codes($pdo);
+    $pdo->prepare('DELETE FROM pair_codes WHERE owner_id = ?')->execute([$ownerId]);
+    $code = generate_pair_code($pdo);
+    $created = utcnow();
+    $expires = gmdate('Y-m-d\TH:i:s\Z', time() + PAIR_CODE_TTL_SECONDS);
+    $pdo->prepare('INSERT INTO pair_codes (code, owner_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+        ->execute([$code, $ownerId, $expires, $created]);
+    return ['code' => $code, 'expires_at' => $expires];
+}
+
+function upsert_contact_pair(PDO $pdo, int $leftUserId, int $rightUserId): void
+{
+    $created = utcnow();
+    $pdo->prepare('INSERT OR IGNORE INTO contacts (owner_id, contact_id, alias, created_at) VALUES (?, ?, NULL, ?)')
+        ->execute([$leftUserId, $rightUserId, $created]);
+    $pdo->prepare('INSERT OR IGNORE INTO contacts (owner_id, contact_id, alias, created_at) VALUES (?, ?, NULL, ?)')
+        ->execute([$rightUserId, $leftUserId, $created]);
 }
 
 function migrate_message_uuids(PDO $pdo): void
@@ -489,6 +569,11 @@ function migrate_sequential_user_ids(PDO $pdo): void
         $pdo->prepare('UPDATE media SET recipient_id = ? WHERE recipient_id = ?')->execute([$new, $old]);
         $pdo->prepare('UPDATE contacts SET owner_id = ? WHERE owner_id = ?')->execute([$new, $old]);
         $pdo->prepare('UPDATE contacts SET contact_id = ? WHERE contact_id = ?')->execute([$new, $old]);
+        try {
+            $pdo->prepare('UPDATE pair_codes SET owner_id = ? WHERE owner_id = ?')->execute([$new, $old]);
+        }
+        catch (PDOException $e) {
+        }
     }
     $pdo->exec('PRAGMA foreign_keys=ON;');
 }
@@ -714,6 +799,11 @@ if ($route === '/register' && $method === 'POST') {
             $pdo->prepare('UPDATE media SET recipient_id = ? WHERE recipient_id = ?')->execute([$new_id, $user_id]);
             $pdo->prepare('UPDATE contacts SET owner_id = ? WHERE owner_id = ?')->execute([$new_id, $user_id]);
             $pdo->prepare('UPDATE contacts SET contact_id = ? WHERE contact_id = ?')->execute([$new_id, $user_id]);
+            try {
+                $pdo->prepare('UPDATE pair_codes SET owner_id = ? WHERE owner_id = ?')->execute([$new_id, $user_id]);
+            }
+            catch (PDOException $e) {
+            }
             $pdo->exec('PRAGMA foreign_keys=ON;');
             $user_id = $new_id;
         }
@@ -843,6 +933,41 @@ if (preg_match('#^/users/(\d+)$#', $route, $m) && $method === 'GET') {
     json_response($row);
 }
 
+if ($route === '/pair-codes' && $method === 'POST') {
+    $user = require_user($pdo);
+    json_response(create_pair_code($pdo, (int)$user['id']));
+}
+
+if ($route === '/pair-codes/redeem' && $method === 'POST') {
+    $user = require_user($pdo);
+    $payload = parse_json_body();
+    $rawCode = strtoupper(trim((string)($payload['code'] ?? '')));
+    $code = preg_replace('/[^A-Z0-9]/', '', $rawCode);
+    if ($code === '') {
+        fail(400, 'pair code required');
+    }
+    cleanup_pair_codes($pdo);
+    $stmt = $pdo->prepare('SELECT code, owner_id, expires_at FROM pair_codes WHERE code = ?');
+    $stmt->execute([$code]);
+    $pair = $stmt->fetch();
+    if (!$pair || strtotime($pair['expires_at']) <= time()) {
+        fail(404, 'Pair code not found');
+    }
+    if ((int)$pair['owner_id'] === (int)$user['id']) {
+        fail(400, 'Cannot redeem your own pair code');
+    }
+    upsert_contact_pair($pdo, (int)$user['id'], (int)$pair['owner_id']);
+    $pdo->prepare('DELETE FROM pair_codes WHERE code = ?')->execute([$code]);
+
+    $stmt = $pdo->prepare('SELECT users.id, users.display_name, users.sign_public_key, users.box_public_key, contacts.alias
+        FROM contacts
+        JOIN users ON contacts.contact_id = users.id
+        WHERE contacts.owner_id = ? AND contacts.contact_id = ?');
+    $stmt->execute([(int)$user['id'], (int)$pair['owner_id']]);
+    $row = $stmt->fetch();
+    json_response($row ?: []);
+}
+
 if ($route === '/contacts' && $method === 'GET') {
     $user = require_user($pdo);
     $stmt = $pdo->prepare('SELECT users.id, users.display_name, users.sign_public_key, users.box_public_key, contacts.alias
@@ -869,8 +994,11 @@ if ($route === '/contacts' && $method === 'POST') {
     if (!$target) {
         fail(404, 'User not found');
     }
+    $created = utcnow();
     $pdo->prepare('INSERT OR REPLACE INTO contacts (owner_id, contact_id, alias, created_at) VALUES (?, ?, ?, ?)')
-        ->execute([(int)$user['id'], $contactId, $alias, utcnow()]);
+        ->execute([(int)$user['id'], $contactId, $alias, $created]);
+    $pdo->prepare('INSERT OR IGNORE INTO contacts (owner_id, contact_id, alias, created_at) VALUES (?, ?, NULL, ?)')
+        ->execute([$contactId, (int)$user['id'], $created]);
     $stmt = $pdo->prepare('SELECT users.id, users.display_name, users.sign_public_key, users.box_public_key, contacts.alias
         FROM contacts
         JOIN users ON contacts.contact_id = users.id

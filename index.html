@@ -4,31 +4,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="shard-build" content="21" />
+  <meta name="shard-build" content="33" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <base href="./" />
   <title>Shard - Private conversations</title>
-  <link rel="stylesheet" href="static/styles.css?v=shard-21" />
+  <link rel="stylesheet" href="static/styles.css?v=shard-33" />
   <link rel="icon" href="static/favicon.svg" type="image/svg+xml" />
 </head>
 
 <body>
+  <div id="globalLangDock" class="global-lang-dock" role="group" aria-label="global language switcher">
+    <span class="global-lang-dock__label" data-i18n="lang.switchLabel">Language</span>
+    <button id="globalLangSwitchEn" class="lang-chip" type="button">EN</button>
+    <button id="globalLangSwitchRu" class="lang-chip" type="button">RU</button>
+  </div>
   <div class="bg" aria-hidden="true">
     <div class="orb orb--a"></div>
     <div class="orb orb--b"></div>
     <div class="orb orb--c"></div>
     <div class="grain"></div>
     <div class="vignette"></div>
-  </div>
-
-  <div class="version-badge">v 0.1</div>
-
-  <div id="floatingLangSwitch" class="floating-lang-switch" role="group" aria-label="language switcher">
-    <span class="floating-lang-switch__label" data-i18n="lang.switchLabel">Language</span>
-    <button id="langSwitchEn" class="lang-chip" type="button">EN</button>
-    <button id="langSwitchRu" class="lang-chip" type="button">RU</button>
   </div>
 
   <div id="loadingOverlay" class="loading-overlay hidden">
@@ -79,21 +76,20 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <div class="brand-text">
-            <span class="brand-title">Shard <span class="brand-ver">v0.1</span></span>
+            <span class="brand-title">Shard <span class="brand-ver">v0.3</span></span>
             <span class="brand-sub" data-i18n="brand.subtitle">Private. Minimal. Experimental.</span>
           </div>
         </div>
         <div class="top-actions">
+          <div id="floatingLangSwitch" class="floating-lang-switch" role="group" aria-label="language switcher">
+            <span class="floating-lang-switch__label" data-i18n="lang.switchLabel">Language</span>
+            <button id="langSwitchEn" class="lang-chip" type="button">EN</button>
+            <button id="langSwitchRu" class="lang-chip" type="button">RU</button>
+          </div>
           <span id="sessionStatus" class="pill pill--status" data-state="locked" data-i18n="session.locked">Session locked</span>
           <button id="lockBtn" class="ghost" type="button" data-i18n="session.lockButton">Lock</button>
         </div>
       </header>
-
-      <div class="project-disclaimer">
-        <div class="project-disclaimer__badge" data-i18n="disclaimer.badge">Experimental project</div>
-        <p id="projectDisclaimerText" class="project-disclaimer__text" data-i18n="disclaimer.text">This is an experimental project. Not audited. Do not use for critical security needs.</p>
-        <p id="projectDisclaimerOriginal" class="project-disclaimer__original">This is an experimental project. Not audited. Do not use for critical security needs.</p>
-      </div>
 
       <div class="shell">
         <aside class="sidebar">
@@ -110,7 +106,7 @@
 
           <div class="sidebar-tabs">
             <button class="tab-btn active" type="button" data-tab="contacts" data-i18n="tabs.contacts">Contacts</button>
-            <button class="tab-btn" type="button" data-tab="security" data-i18n="tabs.security">News and Security</button>
+            <button class="tab-btn" type="button" data-tab="security" data-i18n="tabs.security">🔐 Про безопасность</button>
           </div>
 
           <section id="tabContacts" class="card tab-content active">
@@ -126,6 +122,23 @@
             <div class="contact-add">
               <input id="contactCodeInput" type="text" data-i18n-placeholder="contacts.inputPlaceholder" placeholder="Enter a numeric contact ID" />
               <button id="saveContact" class="primary" type="button" data-i18n="contacts.addButton">Add contact</button>
+            </div>
+            <div class="quick-connect card-lite">
+              <div class="section-head quick-connect__head">
+                <div>
+                  <h3 data-i18n="pair.title">Nearby connect</h3>
+                  <p class="muted tiny" data-i18n="pair.subtitle">Generate a short code for a person nearby. They enter it once, and both contacts appear automatically.</p>
+                </div>
+                <button id="generatePairCode" class="ghost" type="button" data-i18n="pair.generate">Show code</button>
+              </div>
+              <div class="quick-connect__code">
+                <div id="pairCodeValue" class="pair-code-value" data-i18n="pair.empty">No active code</div>
+                <div id="pairCodeMeta" class="muted tiny" data-i18n="pair.meta">The code works for 10 minutes.</div>
+              </div>
+              <div class="quick-connect__redeem">
+                <input id="pairCodeInput" type="text" maxlength="8" autocomplete="off" autocapitalize="characters" data-i18n-placeholder="pair.inputPlaceholder" placeholder="Enter short code" />
+                <button id="redeemPairCode" class="primary" type="button" data-i18n="pair.redeem">Connect</button>
+              </div>
             </div>
           </section>
         </aside>
@@ -197,51 +210,83 @@
   </main>
 
   <div id="authModal" class="modal hidden">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2 data-i18n="auth.title">Enter your 12-word mnemonic</h2>
-        <p class="muted" data-i18n="auth.subtitle">This is your only key. Store it offline.</p>
+    <div class="modal-card modal-card--auth">
+      <div class="auth-showcase">
+        <section class="welcome-panel liquid-panel">
+          <p class="label" data-i18n="welcome.kicker">Private messenger</p>
+          <h2 data-i18n="welcome.title">Welcome to Shard</h2>
+          <p class="muted" data-i18n="welcome.body">Private conversations in a darker, cleaner interface built to feel immediate.</p>
+          <ul class="welcome-points">
+            <li data-i18n="welcome.point1">Encrypted dialogs and media with a calm cinematic UI</li>
+            <li data-i18n="welcome.point2">Instant nearby pairing with a short access code</li>
+            <li data-i18n="welcome.point3">Sharper focus, less friction, faster first contact</li>
+          </ul>
+        </section>
+        <section class="news-panel liquid-panel">
+          <div class="news-panel__head">
+            <p class="label" data-i18n="news.kicker">What’s new</p>
+            <h3 data-i18n="news.title">Latest drops in Shard</h3>
+            <p class="muted tiny" data-i18n="news.subtitle">Fresh details, fast entry, cleaner presence.</p>
+          </div>
+          <div class="news-feed">
+            <article class="news-item">
+              <span class="news-tag" data-i18n="news.tag.hot">Hot</span>
+              <h4 data-i18n="news.item1.title">Instant nearby entry</h4>
+              <p data-i18n="news.item1.body">A short connect code now links two people in seconds and opens the dialog without extra friction.</p>
+            </article>
+            <article class="news-item">
+              <span class="news-tag" data-i18n="news.tag.new">New</span>
+              <h4 data-i18n="news.item2.title">Black liquid-glass interface</h4>
+              <p data-i18n="news.item2.body">Depth, reflections, softer contrast, and a darker premium atmosphere across the first screen.</p>
+            </article>
+            <article class="news-item">
+              <span class="news-tag" data-i18n="news.tag.live">Live</span>
+              <h4 data-i18n="news.item3.title">Faster first contact</h4>
+              <p data-i18n="news.item3.body">New contact discovery feels shorter, cleaner, and more direct from the first second inside Shard.</p>
+            </article>
+          </div>
+        </section>
       </div>
-
-      <div id="autoLogoutBanner" class="auto-logout hidden" data-i18n="auth.autoLogout">Your session ended automatically after a page reload. Sign in again.</div>
-
-      <div class="modal-body">
-        <div class="warning-card warning-card--compact">
-          <div class="warning-card__title" data-i18n="disclaimer.badge">Experimental project</div>
-          <p class="warning-card__text" data-i18n="disclaimer.text">This is an experimental project. Not audited. Do not use for critical security needs.</p>
-          <p class="warning-card__original" data-i18n="disclaimer.original">This is an experimental project. Not audited. Do not use for critical security needs.</p>
+      <div class="auth-panel liquid-panel">
+        <div class="modal-head">
+          <h2 data-i18n="auth.title">Enter your 12-word mnemonic</h2>
+          <p class="muted" data-i18n="auth.subtitle">This is your only key. Store it offline.</p>
         </div>
 
-        <label class="label" for="mnemonicInput" data-i18n="auth.mnemonicLabel">Mnemonic</label>
-        <textarea id="mnemonicInput" rows="3" data-i18n-placeholder="auth.mnemonicPlaceholder" placeholder="12 English words separated by spaces"></textarea>
-        <div class="modal-actions">
-          <button id="generateBtn" class="ghost" type="button" data-i18n="auth.generate">Generate</button>
-          <button id="unlockBtn" class="primary" type="button" data-i18n="auth.unlock">Unlock</button>
+        <div id="autoLogoutBanner" class="auto-logout hidden" data-i18n="auth.autoLogout">Your session ended automatically after a page reload. Sign in again.</div>
+
+        <div class="modal-body">
+          <label class="label" for="mnemonicInput" data-i18n="auth.mnemonicLabel">Mnemonic</label>
+          <textarea id="mnemonicInput" rows="3" data-i18n-placeholder="auth.mnemonicPlaceholder" placeholder="12 English words separated by spaces"></textarea>
+          <div class="modal-actions">
+            <button id="generateBtn" class="ghost" type="button" data-i18n="auth.generate">Generate</button>
+            <button id="unlockBtn" class="primary" type="button" data-i18n="auth.unlock">Unlock</button>
+          </div>
+
+          <div id="generatedBox" class="generated hidden">
+            <h4 data-i18n="auth.generatedTitle">Write these words down now</h4>
+            <p id="generatedMnemonic" class="mnemonic"></p>
+            <button id="copyMnemonic" class="ghost" type="button" data-i18n="auth.copyMnemonic">Copy mnemonic</button>
+          </div>
+
+          <div class="profile">
+            <label class="label" for="displayNameInput" data-i18n="auth.nameLabel">Name</label>
+            <input id="displayNameInput" type="text" data-i18n-placeholder="auth.namePlaceholder" placeholder="Your name" />
+            <p class="muted tiny" data-i18n="auth.nameHint">Your name is set only at registration and cannot be changed later.</p>
+            <label class="checkbox">
+              <input id="rememberToggle" type="checkbox" />
+              <span data-i18n="auth.rememberMnemonic">Remember the mnemonic on this device</span>
+            </label>
+            <label class="checkbox">
+              <input id="staySignedToggle" type="checkbox" />
+              <span data-i18n="auth.staySigned">Stay signed in on this device</span>
+            </label>
+          </div>
         </div>
 
-        <div id="generatedBox" class="generated hidden">
-          <h4 data-i18n="auth.generatedTitle">Write these words down now</h4>
-          <p id="generatedMnemonic" class="mnemonic"></p>
-          <button id="copyMnemonic" class="ghost" type="button" data-i18n="auth.copyMnemonic">Copy mnemonic</button>
+        <div class="modal-foot">
+          <p class="muted" data-i18n="auth.footer">No passwords. No recovery. Only your words.</p>
         </div>
-
-        <div class="profile">
-          <label class="label" for="displayNameInput" data-i18n="auth.nameLabel">Name</label>
-          <input id="displayNameInput" type="text" data-i18n-placeholder="auth.namePlaceholder" placeholder="Your name" />
-          <p class="muted tiny" data-i18n="auth.nameHint">Your name is set only at registration and cannot be changed later.</p>
-          <label class="checkbox">
-            <input id="rememberToggle" type="checkbox" />
-            <span data-i18n="auth.rememberMnemonic">Remember the mnemonic on this device</span>
-          </label>
-          <label class="checkbox">
-            <input id="staySignedToggle" type="checkbox" />
-            <span data-i18n="auth.staySigned">Stay signed in on this device</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="modal-foot">
-        <p class="muted" data-i18n="auth.footer">No passwords. No recovery. Only your words.</p>
       </div>
     </div>
   </div>
@@ -273,9 +318,9 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="inAppNotifications" class="inapp-notifications" aria-live="polite"></div>
 
-  <script src="static/vendor/nacl.min.js?v=shard-21"></script>
-  <script src="static/vendor/nacl-util.min.js?v=shard-21"></script>
-  <script src="static/app.js?v=shard-21"></script>
+  <script src="static/vendor/nacl.min.js?v=shard-33"></script>
+  <script src="static/vendor/nacl-util.min.js?v=shard-33"></script>
+  <script src="static/app.js?v=shard-33"></script>
 </body>
 
 </html>

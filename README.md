@@ -1,12 +1,9 @@
 # Shard
 
-This is an experimental project. Not audited. Do not use for critical security needs.
-
 Shard is a lightweight web messenger with client-side encryption, a PHP backend, and SQLite storage. The current build includes English and Russian UI support with explicit language confirmation on first launch.
 
 ## Status
 
-- Experimental
 - No external security audit
 - Designed for small self-hosted or shared-hosting deployments
 - Browser language is used only as a recommendation, never as a forced override

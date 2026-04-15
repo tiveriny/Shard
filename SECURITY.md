@@ -1,7 +1,5 @@
 # Security Policy
 
-This is an experimental project. Not audited. Do not use for critical security needs.
-
 ## Supported Versions
 
 Only the current code in the main published branch is expected to receive fixes. No long-term support policy is promised.

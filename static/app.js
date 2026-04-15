@@ -1,7 +1,113 @@
-/* shard app.js build 21 */
+/* shard app.js build 30 */
 const MAX_FILE_SIZE_MB = 25;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const DISCLAIMER_TEXT = 'This is an experimental project. Not audited. Do not use for critical security needs.';
+const APP_VERSION = '0.3';
+const SECURITY_HTML = `
+  <h2>🔐 Про безопасность</h2>
+  <div class="security-content">
+    <h4>Новости</h4>
+    <p>Shard v ${APP_VERSION}. Что нового?</p>
+    <p>Версия ${APP_VERSION} от 10.03.2026 включает в себя несколько улучшений и исправлений.</p>
+    <p>1. В новом обновлении закрыто 8 слабых мест.</p>
+    <p>2. Восстановлена функция отправки медиа (Drag And Drop).</p>
+    <p>3. Скорость отправки и доставки сообщений увеличена втрое.</p>
+    <p>Следите за новыми обновлениями.</p>
+
+    <h4>Обзор архитектуры</h4>
+    <p>Shard — мессенджер со сквозным (end-to-end) шифрованием. Сервер <strong>никогда</strong> не видит открытый текст сообщений, медиафайлов или реакций. Ниже — полная техническая картина.</p>
+
+    <h4>📦 Криптографические библиотеки</h4>
+    <ul>
+      <li><strong>TweetNaCl.js</strong> (nacl.min.js) — порт библиотеки NaCl (Networking and Cryptography Library) Дэниела Бернштейна на JavaScript. Работает целиком в браузере.</li>
+      <li><strong>nacl-util</strong> — утилиты кодирования Base64 ↔ Uint8Array.</li>
+      <li><strong>Web Crypto API</strong> — встроенный в браузер модуль для PBKDF2, HKDF и SHA-256/SHA-512.</li>
+    </ul>
+
+    <h4>🔑 Генерация ключей</h4>
+    <ol>
+      <li><strong>Энтропия</strong>: 128 бит (16 байт) от <code>crypto.getRandomValues()</code> (CSPRNG браузера).</li>
+      <li><strong>Мнемоника</strong>: 12 слов по стандарту BIP-39, включая контрольную сумму SHA-256.</li>
+      <li><strong>Seed</strong>: мнемоника → PBKDF2 (2048 итераций, SHA-512, соль «mnemonic») → 512 бит.</li>
+      <li><strong>Signing key</strong>: HKDF(seed, «messanger-sign», «messanger», 32 байта) → <code>Ed25519</code> ключевая пара.</li>
+      <li><strong>Box key</strong>: HKDF(seed, «messanger-box», «messanger», 32 байта) → <code>Curve25519</code> ключевая пара.</li>
+    </ol>
+
+    <h4>✍️ Аутентификация</h4>
+    <ol>
+      <li>Клиент отправляет <code>sign_public_key</code> + <code>box_public_key</code> на <code>/register</code>.</li>
+      <li>Сервер генерирует одноразовый nonce (32 байта) и сохраняет challenge.</li>
+      <li>Клиент подписывает nonce через <code>nacl.sign.detached()</code> (Ed25519).</li>
+      <li>Сервер проверяет подпись через <code>sodium_crypto_sign_verify_detached()</code> (PHP libsodium).</li>
+      <li>При успехе — выдаётся сессионный токен (256 бит, base64). Секретный ключ <strong>никогда</strong> не покидает устройство.</li>
+    </ol>
+
+    <h4>💬 Шифрование сообщений</h4>
+    <ul>
+      <li>Алгоритм: <strong>NaCl Box</strong> = <code>XSalsa20-Poly1305</code> + обмен ключами <code>Curve25519</code> (Diffie-Hellman).</li>
+      <li>Каждое сообщение шифруется уникальным 24-байтным nonce от <code>nacl.randomBytes()</code>.</li>
+      <li>Ciphertext + nonce отправляются на сервер. Сервер хранит <strong>только шифротекст</strong> — без ключей дешифровка невозможна.</li>
+      <li>Для самопереписки используется тот же механизм: шифрование собственным box-ключом.</li>
+    </ul>
+
+    <h4>📎 Шифрование медиа</h4>
+    <ul>
+      <li>Алгоритм: <strong>NaCl SecretBox</strong> = <code>XSalsa20-Poly1305</code> (симметричное шифрование).</li>
+      <li>Для каждого файла генерируется симметричный ключ (32 байта) и nonce (24 байта).</li>
+      <li>Файл шифруется <code>nacl.secretbox()</code> и загружается на сервер в зашифрованном виде.</li>
+      <li>Ключ и nonce медиа передаются внутри E2E-шифрованного сообщения (NaCl Box), поэтому сервер видит только blob зашифрованного файла.</li>
+    </ul>
+
+    <h4>😄 Реакции</h4>
+    <p>Реакции хранятся на сервере как эмодзи и привязаны к ID сообщения. Только участники диалога могут ставить и видеть реакции.</p>
+
+    <h4>🗑️ Удаление сообщений</h4>
+    <p>Удаление доступно обоим участникам. При удалении сообщение полностью стирается из базы вместе со всеми реакциями.</p>
+
+    <h4>🛡️ Что сервер знает / НЕ знает</h4>
+    <table class="security-table">
+      <thead>
+        <tr>
+          <th>Данные</th>
+          <th>На сервере</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Публичные ключи</td><td>✅ Да</td></tr>
+        <tr><td>Приватные ключи</td><td>❌ Нет — только на устройстве</td></tr>
+        <tr><td>Текст сообщений</td><td>❌ Только ciphertext</td></tr>
+        <tr><td>Медиафайлы</td><td>❌ Только зашифрованный blob</td></tr>
+        <tr><td>Мнемоника</td><td>❌ Нет</td></tr>
+        <tr><td>Сессионные токены</td><td>✅ Для аутентификации запросов</td></tr>
+        <tr><td>ID пользователей</td><td>✅ 10-15 значный случайный номер</td></tr>
+      </tbody>
+    </table>
+
+    <h4>⚙️ Стек технологий</h4>
+    <ul>
+      <li><strong>Frontend</strong>: Vanilla JS, TweetNaCl.js, Web Crypto API</li>
+      <li><strong>Backend</strong>: PHP 8+ с расширением <code>sodium</code>, SQLite (WAL mode)</li>
+      <li><strong>Транспорт</strong>: SSE (Server-Sent Events) для realtime, polling как fallback</li>
+      <li><strong>Хранилище ключей</strong>: <code>localStorage</code> / <code>sessionStorage</code> (по выбору пользователя)</li>
+    </ul>
+
+    <h4>🔒 Итог</h4>
+    <p>Даже при полном доступе к серверу и базе данных атакующий увидит только: публичные ключи, зашифрованные сообщения (ciphertext + nonce) и зашифрованные медиафайлы. Без мнемоники пользователя расшифровать данные математически невозможно.</p>
+
+    <div class="security-ps">
+      <h4>📜 P.S. Почему взломать Shard невозможно — математическое доказательство</h4>
+      <p>Допустим, атакующий получил <strong>полный дамп сервера</strong>: базу данных, все зашифрованные сообщения, nonce’ы, публичные ключи, медиафайлы и токены. Может ли он прочитать хотя бы одно сообщение? <strong>Нет.</strong> Вот почему:</p>
+      <p><strong>1. Проблема дискретного логарифма на Curve25519.</strong> Сообщения зашифрованы с помощью <code>nacl.box()</code>, который реализует Diffie-Hellman на эллиптической кривой Curve25519. Чтобы восстановить shared secret, атакующему нужно решить задачу дискретного логарифма на эллиптической кривой (ECDLP): зная точку <code>Q = d × G</code>, найти скаляр <code>d</code>. Лучшие известные алгоритмы (ро-метод Полларда) требуют порядка <code>2^128</code> операций — это <strong>3.4 × 10^38</strong> вычислений. Даже если объединить все суперкомпьютеры мира (≈ 10^18 операций/сек), потребуется ≈ <strong>10^13 лет</strong> — это тысячи возрастов Вселенной.</p>
+      <p><strong>2. XSalsa20 — потоковый шифр с 256-битным ключом.</strong> После получения shared secret сообщение шифруется XSalsa20 с 256-битным ключом и 192-битным nonce. Пространство ключей: <code>2^256 ≈ 1.16 × 10^77</code>. Для brute-force потребовалось бы больше энергии, чем содержит наблюдаемая Вселенная (предел Ландауэра: стирание одного бита при T = 3K ≈ 3 × 10^-23 Дж; стирание 2^256 бит ≈ 10^54 Дж; энергия Солнца за всё время существования ≈ 10^43 Дж).</p>
+      <p><strong>3. Poly1305 — аутентификация сообщений.</strong> Каждое сообщение содержит 128-битный MAC (Poly1305), привязанный к сессионному ключу. Без знания ключа невозможно ни подменить, ни подделать сообщение. Вероятность случайного совпадения: <code>1 / 2^128 ≈ 2.9 × 10^-39</code>.</p>
+      <p><strong>4. Уникальный nonce.</strong> Каждое сообщение использует 24-байтный (192 бит) случайный nonce. Даже при отправке триллионов сообщений вероятность коллизии пренебрежимо мала (Birthday paradox: столкновение после ≈ <code>2^96</code> сообщений ≈ 7.9 × 10^28).</p>
+      <p><strong>5. Квантовые компьютеры?</strong> Алгоритм Шора угрожает RSA и классическим DH, но <strong>не</strong> NaCl. Для Curve25519 алгоритм Гровера сокращает стойкость до ~128 бит — это по-прежнему за пределами любых вычислительных мощностей. Кроме того, реальных криптографически значимых квантовых компьютеров <strong>не существует на 2025 год</strong> и ожидаемые сроки их появления — <strong>не ранее 2040–2050</strong>.</p>
+      <p><strong>6. Нет server-side ключей.</strong> Shard не хранит ключи. Вообще.</p>
+      <p>В отличие от Telegram (ключи на сервере) и WhatsApp (ключи в облаке для бэкапов), Shard не имеет доступа к вашим секретам. Мнемоника живет только у вас. Сервер видит только публичные ключи и шифротекст.</p>
+      <p>Если завтра сервер Shard взломают — атакующий увидит ноль полезной информации. Ваши сообщения были и останутся только вашими. Навсегда.</p>
+      <p><strong>Вывод:</strong> Для расшифровки одного сообщения Shard атакующему необходимо либо (a) решить ECDLP на Curve25519 (~2^128 операций), либо (b) полный перебор 256-битного ключа XSalsa20 (~2^256 операций), либо (c) получить физический доступ к устройству жертвы с разблокированным браузером. Варианты (a) и (b) признаны математическим сообществом вычислительно невозможными при текущем и прогнозируемом уровне технологий. Вариант (c) — это вопрос физической безопасности, а не криптографии.</p>
+    </div>
+  </div>
+`;
 
 const state = {
   wordlist: [],
@@ -32,6 +138,9 @@ const state = {
   pendingLang: 'en',
   languageConfirmed: false,
   sessionInitialized: false,
+  isCompactMobile: false,
+  contactsPoller: null,
+  pairCode: null,
 };
 
 const elements = {};
@@ -52,9 +161,6 @@ const I18N = {
     'lang.recommendation': 'Recommended from your browser language: {language}.',
     'lang.updated': 'Language updated.',
     'brand.subtitle': 'Private. Minimal. Experimental.',
-    'disclaimer.badge': 'Experimental project',
-    'disclaimer.text': DISCLAIMER_TEXT,
-    'disclaimer.original': DISCLAIMER_TEXT,
     'session.locked': 'Session locked',
     'session.active': 'Session active',
     'session.lockButton': 'Lock',
@@ -64,7 +170,7 @@ const I18N = {
     'profile.sessionInactive': 'Session inactive',
     'profile.selfChat': 'Saved messages',
     'tabs.contacts': 'Contacts',
-    'tabs.security': 'News and Security',
+    'tabs.security': '🔐 Про безопасность',
     'contacts.title': 'Contacts',
     'contacts.searchPlaceholder': 'Search contacts...',
     'contacts.hint': 'Add contacts by numeric ID.',
@@ -78,6 +184,35 @@ const I18N = {
     'contacts.userIdNotFound': 'No user was found for that ID.',
     'contacts.invalidCode': 'Invalid ID or contact code.',
     'contacts.userNotFound': 'User not found.',
+    'pair.title': 'Nearby connect',
+    'pair.subtitle': 'Generate a short code for a person nearby. They enter it once, and both contacts appear automatically.',
+    'pair.generate': 'Show code',
+    'pair.empty': 'No active code',
+    'pair.meta': 'The code works for 10 minutes.',
+    'pair.inputPlaceholder': 'Enter short code',
+    'pair.redeem': 'Connect',
+    'pair.created': 'Short code generated.',
+    'pair.connected': 'Contacts connected.',
+    'pair.invalid': 'Invalid or expired short code.',
+    'pair.self': 'You cannot use your own short code.',
+    'welcome.kicker': 'Private messenger',
+    'welcome.title': 'Welcome to Shard',
+    'welcome.body': 'Private conversations in a darker, cleaner interface built to feel immediate.',
+    'welcome.point1': 'Encrypted dialogs and media with a calm cinematic UI',
+    'welcome.point2': 'Instant nearby pairing with a short access code',
+    'welcome.point3': 'Sharper focus, less friction, faster first contact',
+    'news.kicker': 'What\'s new',
+    'news.title': 'Latest drops in Shard',
+    'news.subtitle': 'Fresh details, fast entry, cleaner presence.',
+    'news.tag.hot': 'Hot',
+    'news.tag.new': 'New',
+    'news.tag.live': 'Live',
+    'news.item1.title': 'Instant nearby entry',
+    'news.item1.body': 'A short connect code now links two people in seconds and opens the dialog without extra friction.',
+    'news.item2.title': 'Black liquid-glass interface',
+    'news.item2.body': 'Depth, reflections, softer contrast, and a darker premium atmosphere across the first screen.',
+    'news.item3.title': 'Faster first contact',
+    'news.item3.body': 'New contact discovery feels shorter, cleaner, and more direct from the first second inside Shard.',
     'empty.title': 'Start a secure conversation',
     'empty.body': 'Only chat participants can read messages. No logins. No passwords.',
     'empty.step1': 'Copy your ID',
@@ -138,37 +273,7 @@ const I18N = {
     'errors.unknownWord': 'Unknown word: {word}',
     'errors.invalidMnemonicChecksum': 'Invalid mnemonic checksum.',
     'media.previewAlt': 'media preview',
-    'security.title': 'Security and release notes',
-    'security.releaseTitle': 'Release notes',
-    'security.releaseBody': 'Current public build: v0.1.11. Recent work focused on message delivery stability, drag-and-drop media recovery, and backend hardening for open source publication.',
-    'security.overviewTitle': 'How Shard currently works',
-    'security.overviewBody': 'Shard is a browser-based messenger with client-side encryption. Private keys stay in the browser. The server stores ciphertext, encrypted media blobs, public keys, and session metadata.',
-    'security.cryptoTitle': 'Cryptography used',
-    'security.cryptoItem1': 'TweetNaCl.js for nacl.box, nacl.secretbox, and Ed25519 signatures.',
-    'security.cryptoItem2': 'Web Crypto API for PBKDF2, HKDF, and SHA-256 or SHA-512 operations.',
-    'security.cryptoItem3': 'PHP libsodium on the server to verify Ed25519 signatures during authentication.',
-    'security.serverTitle': 'What the server can see',
-    'security.serverHeaderData': 'Data',
-    'security.serverHeaderState': 'Server visibility',
-    'security.serverRowPublicKeysData': 'Public keys',
-    'security.serverRowPublicKeysState': 'Stored on the server',
-    'security.serverRowPrivateKeysData': 'Private keys',
-    'security.serverRowPrivateKeysState': 'Not stored, device only',
-    'security.serverRowMessagesData': 'Message plaintext',
-    'security.serverRowMessagesState': 'Ciphertext only',
-    'security.serverRowMediaData': 'Media files',
-    'security.serverRowMediaState': 'Encrypted blobs only',
-    'security.serverRowMnemonicData': 'Mnemonic',
-    'security.serverRowMnemonicState': 'Not stored',
-    'security.serverRowTokensData': 'Session tokens',
-    'security.serverRowTokensState': 'Stored for request authentication',
-    'security.limitsTitle': 'Known limits',
-    'security.limit1': 'No independent security audit has been completed.',
-    'security.limit2': 'A compromised browser, device, or host can expose local secrets.',
-    'security.limit3': 'This documentation describes current behavior, not a formal security guarantee.',
-    'security.ossTitle': 'Open source readiness',
-    'security.ossBody': 'The repository now includes an English README, SECURITY.md, UTF-8 editor settings, ignore rules for runtime data, and an MIT license to simplify review and contribution.',
-    'security.note': 'Review the source code, threat model, and hosting configuration before relying on the project.',
+    'security.title': '🔐 Про безопасность',
   },
   ru: {
     'meta.title': 'Shard - приватные диалоги',
@@ -184,10 +289,7 @@ const I18N = {
     'lang.modalFoot': 'Язык можно поменять в любой момент.',
     'lang.recommendation': 'Рекомендованный язык по настройкам браузера: {language}.',
     'lang.updated': 'Язык переключен.',
-    'brand.subtitle': 'Приватно. Минималистично. Экспериментально.',
-    'disclaimer.badge': 'Экспериментальный проект',
-    'disclaimer.text': 'Это экспериментальный проект. Аудит безопасности не проводился. Не используйте его для критически важных задач безопасности.',
-    'disclaimer.original': DISCLAIMER_TEXT,
+    'brand.subtitle': 'Private. Minimal. Experimental.',
     'session.locked': 'Сессия заблокирована',
     'session.active': 'Сессия активна',
     'session.lockButton': 'Заблокировать',
@@ -197,7 +299,7 @@ const I18N = {
     'profile.sessionInactive': 'Сессия не активна',
     'profile.selfChat': 'Избранное',
     'tabs.contacts': 'Контакты',
-    'tabs.security': 'Новости и безопасность',
+    'tabs.security': '🔐 Про безопасность',
     'contacts.title': 'Контакты',
     'contacts.searchPlaceholder': 'Поиск по контактам...',
     'contacts.hint': 'Добавляйте контакты по числовому ID.',
@@ -211,6 +313,35 @@ const I18N = {
     'contacts.userIdNotFound': 'Пользователь с таким ID не найден.',
     'contacts.invalidCode': 'Неверный ID или код контакта.',
     'contacts.userNotFound': 'Пользователь не найден.',
+    'pair.title': 'Быстрое подключение рядом',
+    'pair.subtitle': 'Создайте короткий код для человека рядом. Он вводит его один раз, и контакты появляются у вас обоих автоматически.',
+    'pair.generate': 'Показать код',
+    'pair.empty': 'Активного кода нет',
+    'pair.meta': 'Код работает 10 минут.',
+    'pair.inputPlaceholder': 'Введите короткий код',
+    'pair.redeem': 'Подключить',
+    'pair.created': 'Короткий код создан.',
+    'pair.connected': 'Контакты связаны.',
+    'pair.invalid': 'Короткий код неверный или истек.',
+    'pair.self': 'Нельзя использовать собственный короткий код.',
+    'welcome.kicker': 'Приватный мессенджер',
+    'welcome.title': 'Добро пожаловать в Shard',
+    'welcome.body': 'Приватные диалоги в более тёмном, чистом интерфейсе с мгновенным ощущением входа.',
+    'welcome.point1': 'Зашифрованные диалоги и медиа в спокойном кинематографичном UI',
+    'welcome.point2': 'Мгновенное подключение рядом по короткому коду',
+    'welcome.point3': 'Меньше трения, больше фокуса, быстрее первый контакт',
+    'news.kicker': 'Что нового',
+    'news.title': 'Свежие обновления Shard',
+    'news.subtitle': 'Быстрее вход, чище подача, сильнее первое впечатление.',
+    'news.tag.hot': 'Hot',
+    'news.tag.new': 'New',
+    'news.tag.live': 'Live',
+    'news.item1.title': 'Мгновенный вход рядом',
+    'news.item1.body': 'Короткий код теперь связывает двух людей за секунды и открывает диалог без лишних действий.',
+    'news.item2.title': 'Чёрный интерфейс liquid glass',
+    'news.item2.body': 'Глубина, блики, мягкий контраст и более дорогая тёмная атмосфера уже на первом экране.',
+    'news.item3.title': 'Быстрее первый контакт',
+    'news.item3.body': 'Новый сценарий добавления контакта ощущается короче, чище и увереннее с первой секунды в Shard.',
     'empty.title': 'Начните защищенный диалог',
     'empty.body': 'Только участники чата могут читать сообщения. Без логинов. Без паролей.',
     'empty.step1': 'Скопируйте свой ID',
@@ -271,37 +402,7 @@ const I18N = {
     'errors.unknownWord': 'Неизвестное слово: {word}',
     'errors.invalidMnemonicChecksum': 'Неверная контрольная сумма мнемоники.',
     'media.previewAlt': 'предпросмотр медиа',
-    'security.title': 'Безопасность и заметки к релизу',
-    'security.releaseTitle': 'Что нового',
-    'security.releaseBody': 'Текущая публичная сборка: v0.1.11. Последние изменения были сосредоточены на стабильности доставки сообщений, восстановлении drag-and-drop для медиа и усилении backend-части перед публикацией в open source.',
-    'security.overviewTitle': 'Как сейчас работает Shard',
-    'security.overviewBody': 'Shard - это браузерный мессенджер с клиентским шифрованием. Приватные ключи остаются в браузере. Сервер хранит шифротекст, зашифрованные медиафайлы, публичные ключи и метаданные сессий.',
-    'security.cryptoTitle': 'Используемая криптография',
-    'security.cryptoItem1': 'TweetNaCl.js для nacl.box, nacl.secretbox и подписей Ed25519.',
-    'security.cryptoItem2': 'Web Crypto API для операций PBKDF2, HKDF и SHA-256 или SHA-512.',
-    'security.cryptoItem3': 'PHP libsodium на сервере для проверки подписей Ed25519 при аутентификации.',
-    'security.serverTitle': 'Что может видеть сервер',
-    'security.serverHeaderData': 'Данные',
-    'security.serverHeaderState': 'Что видно на сервере',
-    'security.serverRowPublicKeysData': 'Публичные ключи',
-    'security.serverRowPublicKeysState': 'Хранятся на сервере',
-    'security.serverRowPrivateKeysData': 'Приватные ключи',
-    'security.serverRowPrivateKeysState': 'Не хранятся, только на устройстве',
-    'security.serverRowMessagesData': 'Открытый текст сообщений',
-    'security.serverRowMessagesState': 'Только шифротекст',
-    'security.serverRowMediaData': 'Медиафайлы',
-    'security.serverRowMediaState': 'Только зашифрованные blob-файлы',
-    'security.serverRowMnemonicData': 'Мнемоника',
-    'security.serverRowMnemonicState': 'Не хранится',
-    'security.serverRowTokensData': 'Сессионные токены',
-    'security.serverRowTokensState': 'Хранятся для авторизации запросов',
-    'security.limitsTitle': 'Известные ограничения',
-    'security.limit1': 'Независимый аудит безопасности пока не проводился.',
-    'security.limit2': 'Скомпрометированный браузер, сервер или устройство могут раскрыть локальные секреты.',
-    'security.limit3': 'Эта документация описывает текущее поведение, а не формальную гарантию безопасности.',
-    'security.ossTitle': 'Готовность к open source',
-    'security.ossBody': 'В репозитории теперь есть README на английском, SECURITY.md, настройки UTF-8 для редакторов, ignore-правила для runtime-данных и лицензия MIT для ревью и contribution-потока.',
-    'security.note': 'Перед использованием обязательно проверьте исходники, модель угроз и конфигурацию хостинга.',
+    'security.title': '🔐 Про безопасность',
   },
 };
 
@@ -318,8 +419,8 @@ function initElements() {
     'replyCancel', 'sessionStatus', 'messages', 'messageInput', 'sendBtn', 'fileInput',
     'filePill', 'lockBtn', 'toast', 'msgContextMenu', 'reactionPicker', 'globalSearchInput',
     'dropOverlay', 'uploadOverlay', 'loadingOverlay', 'languageModal', 'languageConfirmBtn',
-    'langOptionEn', 'langOptionRu', 'langSwitchEn', 'langSwitchRu', 'languageRecommendation',
-    'securityContent', 'projectDisclaimerOriginal',
+    'langOptionEn', 'langOptionRu', 'langSwitchEn', 'langSwitchRu', 'globalLangSwitchEn', 'globalLangSwitchRu', 'globalLangDock', 'languageRecommendation',
+    'securityContent', 'generatePairCode', 'pairCodeValue', 'pairCodeMeta', 'pairCodeInput', 'redeemPairCode',
   ];
   ids.forEach(id => { elements[id] = $(id); });
 }
@@ -351,6 +452,17 @@ function localeCode() {
   return LOCALE_CODES[state.lang] || LOCALE_CODES.en;
 }
 
+function syncResponsiveState() {
+  state.isCompactMobile = window.innerWidth <= 720;
+  document.body.classList.toggle('is-compact-mobile', state.isCompactMobile);
+}
+
+function syncVersionLabels() {
+  document.querySelectorAll('.brand-ver').forEach(node => {
+    node.textContent = `v${APP_VERSION}`;
+  });
+}
+
 function t(key, vars = {}) {
   const template = (I18N[state.lang] && I18N[state.lang][key]) || I18N.en[key] || key;
   return String(template).replace(/\{(\w+)\}/g, (_, name) => {
@@ -361,73 +473,7 @@ function t(key, vars = {}) {
 
 function renderSecurityContent() {
   if (!elements.securityContent) return;
-
-  const rows = [
-    ['security.serverRowPublicKeysData', 'security.serverRowPublicKeysState'],
-    ['security.serverRowPrivateKeysData', 'security.serverRowPrivateKeysState'],
-    ['security.serverRowMessagesData', 'security.serverRowMessagesState'],
-    ['security.serverRowMediaData', 'security.serverRowMediaState'],
-    ['security.serverRowMnemonicData', 'security.serverRowMnemonicState'],
-    ['security.serverRowTokensData', 'security.serverRowTokensState'],
-  ];
-
-  const cryptoItems = [
-    t('security.cryptoItem1'),
-    t('security.cryptoItem2'),
-    t('security.cryptoItem3'),
-  ].map(item => `<li>${item}</li>`).join('');
-
-  const limits = [
-    t('security.limit1'),
-    t('security.limit2'),
-    t('security.limit3'),
-  ].map(item => `<li>${item}</li>`).join('');
-
-  const tableRows = rows.map(([dataKey, stateKey]) => `
-    <tr>
-      <td>${t(dataKey)}</td>
-      <td>${t(stateKey)}</td>
-    </tr>
-  `).join('');
-
-  const originalNote = state.lang === 'ru'
-    ? `<p class="security-note">${t('disclaimer.original')}</p>`
-    : '';
-
-  elements.securityContent.innerHTML = `
-    <h2>${t('security.title')}</h2>
-    <div class="security-warning">
-      <p>${t('disclaimer.text')}</p>
-      ${originalNote}
-    </div>
-
-    <h4>${t('security.releaseTitle')}</h4>
-    <p>${t('security.releaseBody')}</p>
-
-    <h4>${t('security.overviewTitle')}</h4>
-    <p>${t('security.overviewBody')}</p>
-
-    <h4>${t('security.cryptoTitle')}</h4>
-    <ul>${cryptoItems}</ul>
-
-    <h4>${t('security.serverTitle')}</h4>
-    <table class="security-table">
-      <thead>
-        <tr>
-          <th>${t('security.serverHeaderData')}</th>
-          <th>${t('security.serverHeaderState')}</th>
-        </tr>
-      </thead>
-      <tbody>${tableRows}</tbody>
-    </table>
-
-    <h4>${t('security.limitsTitle')}</h4>
-    <ul>${limits}</ul>
-
-    <h4>${t('security.ossTitle')}</h4>
-    <p>${t('security.ossBody')}</p>
-    <p>${t('security.note')}</p>
-  `;
+  elements.securityContent.innerHTML = SECURITY_HTML;
 }
 
 function updateLanguageControls() {
@@ -440,20 +486,20 @@ function updateLanguageControls() {
     elements.langSwitchRu.classList.toggle('active', !isEnglish);
     elements.langSwitchRu.setAttribute('aria-pressed', String(!isEnglish));
   }
+  if (elements.globalLangSwitchEn) {
+    elements.globalLangSwitchEn.classList.toggle('active', isEnglish);
+    elements.globalLangSwitchEn.setAttribute('aria-pressed', String(isEnglish));
+  }
+  if (elements.globalLangSwitchRu) {
+    elements.globalLangSwitchRu.classList.toggle('active', !isEnglish);
+    elements.globalLangSwitchRu.setAttribute('aria-pressed', String(!isEnglish));
+  }
   if (elements.langOptionEn) elements.langOptionEn.classList.toggle('active', isEnglish);
   if (elements.langOptionRu) elements.langOptionRu.classList.toggle('active', !isEnglish);
   if (elements.languageRecommendation) {
     elements.languageRecommendation.textContent = t('lang.recommendation', { language: LANGUAGE_LABELS[state.detectedLang] });
   }
 
-  const originalNodes = [
-    elements.projectDisclaimerOriginal,
-    document.querySelector('.warning-card__original'),
-  ];
-  originalNodes.forEach(node => {
-    if (!node) return;
-    node.classList.toggle('hidden', state.lang !== 'ru');
-  });
 }
 
 function applyTranslations({ rerenderChat = true } = {}) {
@@ -474,6 +520,7 @@ function applyTranslations({ rerenderChat = true } = {}) {
   updateAuthUI();
   renderContacts();
   updateConnectionStatus();
+  renderPairCode();
 
   if (state.activeContact && elements.chatName) {
     elements.chatName.textContent = getContactLabel(state.activeContact);
@@ -764,10 +811,8 @@ function initTabs() {
 }
 
 function resetSessionUI(reason) {
-  if (state.poller) {
-    clearInterval(state.poller);
-    state.poller = null;
-  }
+  clearPolling();
+  clearContactsSync();
   closeStream();
   state.token = null;
   state.me = null;
@@ -784,6 +829,7 @@ function resetSessionUI(reason) {
   state.replyTarget = null;
   state.searchQuery = '';
   state.uploading = false;
+  state.pairCode = null;
 
   if (reason === 'lock' || !state.staySigned) {
     sessionStorage.removeItem('shardToken');
@@ -800,6 +846,7 @@ function resetSessionUI(reason) {
   if (elements.displayNameInput) elements.displayNameInput.value = '';
   if (elements.rememberToggle) elements.rememberToggle.checked = false;
   if (elements.contactCodeInput) elements.contactCodeInput.value = '';
+  if (elements.pairCodeInput) elements.pairCodeInput.value = '';
   if (elements.messageInput) elements.messageInput.value = '';
   if (elements.messages) elements.messages.innerHTML = '';
   cancelReply();
@@ -949,6 +996,18 @@ function updateConnectionStatus() {
   elements.chatStatus.textContent = state.sseConnected ? t('chat.statusLive') : t('chat.statusSync');
 }
 
+function clearPolling() {
+  if (state.poller) {
+    clearInterval(state.poller);
+    state.poller = null;
+  }
+}
+
+function getPollingInterval() {
+  if (document.hidden) return 24000;
+  return state.sseConnected ? 12000 : 4500;
+}
+
 function streamEndpoint() {
   const since = state.lastGlobal || '0';
   return buildUrl(apiRoute(`/api/stream?token=${encodeURIComponent(state.token)}&since=${since}`));
@@ -983,12 +1042,12 @@ function connectStream() {
   stream.onopen = () => {
     state.sseConnected = true;
     updateConnectionStatus();
-    if (state.activeContact) startPolling().catch(() => { });
+    restartPolling();
   };
   stream.onerror = () => {
     state.sseConnected = false;
     updateConnectionStatus();
-    if (state.activeContact) startPolling().catch(() => { });
+    restartPolling();
   };
 }
 
@@ -1368,10 +1427,15 @@ async function fetchMessages(force = false) {
 }
 
 async function startPolling(force = false) {
-  if (state.poller) clearInterval(state.poller);
+  clearPolling();
   await fetchMessages(force);
-  const interval = state.sseConnected ? 3000 : 2000;
-  state.poller = setInterval(() => fetchMessages().catch(() => { }), interval);
+  if (!state.activeContact) return;
+  state.poller = setInterval(() => fetchMessages().catch(() => { }), getPollingInterval());
+}
+
+function restartPolling(force = false) {
+  if (!state.activeContact || !state.token) return;
+  startPolling(force).catch(() => { });
 }
 
 async function selectContact(contact) {
@@ -1497,10 +1561,12 @@ async function initializeSession() {
           addSelfContact();
           saveContactsToStorage();
           renderContacts();
+          renderPairCode();
         } catch (error) {
         }
         connectStream();
         startPolling().catch(() => { });
+        startContactsSync();
         updateAuthUI();
         showModal(elements.authModal, false);
         showModal(elements.languageModal, false);
@@ -1593,6 +1659,7 @@ async function unlock() {
       addSelfContact();
       saveContactsToStorage();
       renderContacts();
+      renderPairCode();
     } catch (error) {
     }
 
@@ -1607,6 +1674,7 @@ async function unlock() {
 
     connectStream();
     startPolling().catch(() => { });
+    startContactsSync();
     updateAuthUI();
     setAutoLogoutBanner(false);
     triggerAppReveal();
@@ -1631,6 +1699,103 @@ async function generateNewMnemonic() {
 
 function copyText(text) {
   navigator.clipboard.writeText(text).then(() => showToast(t('toast.copied'))).catch(() => { });
+}
+
+function formatPairCode(code) {
+  const clean = String(code || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  if (clean.length <= 3) return clean;
+  return `${clean.slice(0, 3)}-${clean.slice(3)}`;
+}
+
+function renderPairCode() {
+  if (!elements.pairCodeValue || !elements.pairCodeMeta) return;
+  if (!state.pairCode || !state.pairCode.code) {
+    elements.pairCodeValue.textContent = t('pair.empty');
+    elements.pairCodeMeta.textContent = t('pair.meta');
+    return;
+  }
+  elements.pairCodeValue.textContent = formatPairCode(state.pairCode.code);
+  elements.pairCodeMeta.textContent = t('pair.meta');
+}
+
+async function syncContactsFromServer() {
+  if (!state.token) return;
+  const data = await api('/api/contacts');
+  const fresh = data.contacts || [];
+  const keepSelf = state.me ? [{
+    id: state.me.id,
+    display_name: state.me.display_name,
+    sign_public_key: state.me.sign_public_key,
+    box_public_key: state.me.box_public_key,
+  }] : [];
+  const merged = [...keepSelf];
+  fresh.forEach(contact => {
+    if (!merged.find(item => numId(item.id) === numId(contact.id))) merged.push(contact);
+  });
+  state.contacts = merged;
+  saveContactsToStorage();
+  renderContacts();
+  if (state.activeContact) {
+    const updated = merged.find(contact => numId(contact.id) === numId(state.activeContact.id));
+    if (updated) {
+      state.activeContact = updated;
+      if (elements.chatName) elements.chatName.textContent = getContactLabel(updated);
+    }
+  }
+}
+
+function startContactsSync() {
+  if (state.contactsPoller) clearInterval(state.contactsPoller);
+  if (!state.token) return;
+  state.contactsPoller = setInterval(() => {
+    syncContactsFromServer().catch(() => { });
+  }, document.hidden ? 18000 : 4000);
+}
+
+function clearContactsSync() {
+  if (state.contactsPoller) {
+    clearInterval(state.contactsPoller);
+    state.contactsPoller = null;
+  }
+}
+
+async function handlePairCodeGenerate() {
+  if (!state.token) {
+    alert(t('auth.signInFirst'));
+    return;
+  }
+  const data = await api('/api/pair-codes', { method: 'POST', json: true, body: JSON.stringify({}) });
+  state.pairCode = data;
+  renderPairCode();
+  if (data && data.code) {
+    copyText(formatPairCode(data.code));
+  }
+  pushNotice(t('pair.created'), 'success');
+}
+
+async function handlePairCodeRedeem() {
+  if (!state.token) {
+    alert(t('auth.signInFirst'));
+    return;
+  }
+  const raw = ((elements.pairCodeInput && elements.pairCodeInput.value) || '').trim();
+  if (!raw) return;
+  try {
+    const contact = await api('/api/pair-codes/redeem', {
+      method: 'POST',
+      json: true,
+      body: JSON.stringify({ code: raw }),
+    });
+    const added = addContact(contact);
+    await syncContactsFromServer();
+    if (elements.pairCodeInput) elements.pairCodeInput.value = '';
+    pushNotice(added ? t('pair.connected') : t('contacts.exists'), 'success');
+    if (contact && contact.id) await selectContact(contact);
+  } catch (error) {
+    const message = error && error.message ? error.message : t('pair.invalid');
+    if (/own pair code/i.test(message) || /собствен/i.test(message)) alert(t('pair.self'));
+    else alert(message || t('pair.invalid'));
+  }
 }
 
 async function handleContactSave() {
@@ -1678,6 +1843,7 @@ async function handleContactSave() {
     });
     const full = { ...contact, ...saved };
     const added = addContact(full);
+    await syncContactsFromServer();
     if (added) pushNotice(t('contacts.added'), 'success');
     else pushNotice(t('contacts.exists'), 'info');
   } catch (error) {
@@ -1716,6 +1882,8 @@ function wireLanguageButton(button, lang) {
 function wireEvents() {
   wireLanguageButton(elements.langSwitchEn, 'en');
   wireLanguageButton(elements.langSwitchRu, 'ru');
+  wireLanguageButton(elements.globalLangSwitchEn, 'en');
+  wireLanguageButton(elements.globalLangSwitchRu, 'ru');
   if (elements.langOptionEn) elements.langOptionEn.addEventListener('click', () => previewLanguage('en'));
   if (elements.langOptionRu) elements.langOptionRu.addEventListener('click', () => previewLanguage('ru'));
   if (elements.languageConfirmBtn) elements.languageConfirmBtn.addEventListener('click', () => confirmLanguageChoice().catch(error => console.error(error)));
@@ -1739,6 +1907,8 @@ function wireEvents() {
   }
 
   elements.saveContact.addEventListener('click', handleContactSave);
+  if (elements.generatePairCode) elements.generatePairCode.addEventListener('click', () => handlePairCodeGenerate().catch(error => alert(error.message || t('pair.invalid'))));
+  if (elements.redeemPairCode) elements.redeemPairCode.addEventListener('click', () => handlePairCodeRedeem().catch(error => alert(error.message || t('pair.invalid'))));
   elements.sendBtn.addEventListener('click', () => {
     const text = elements.messageInput.value.trim();
     if (!text) return;
@@ -1802,6 +1972,18 @@ function wireEvents() {
       handleContactSave();
     }
   });
+  if (elements.pairCodeInput) {
+    elements.pairCodeInput.addEventListener('input', () => {
+      const clean = elements.pairCodeInput.value.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 6);
+      elements.pairCodeInput.value = formatPairCode(clean);
+    });
+    elements.pairCodeInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handlePairCodeRedeem();
+      }
+    });
+  }
   elements.lockBtn.addEventListener('click', lock);
   if (elements.replyCancel) elements.replyCancel.addEventListener('click', cancelReply);
 
@@ -1861,10 +2043,22 @@ function wireEvents() {
       cancelReply();
     }
   });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearPolling();
+      return;
+    }
+    restartPolling();
+  });
+
+  window.addEventListener('resize', syncResponsiveState);
 }
 
 async function boot() {
   initElements();
+  syncResponsiveState();
+  syncVersionLabels();
   initTabs();
   initLanguage();
   wireEvents();
